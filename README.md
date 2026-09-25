@@ -1,6 +1,16 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/wordmark-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/wordmark-light.png">
+    <img alt="lockwire" src="assets/wordmark-light.png" width="420">
+  </picture>
+</p>
+
 # lockwire
 
 **Catch stale `CLAUDE.md`, `AGENTS.md`, and docs before your coding agent acts on them.**
+
+The mark is literal, not a metaphor: [lockwiring](https://en.wikipedia.org/wiki/Lock_wire) is the aviation-maintenance technique of threading wire through two fasteners so neither can work loose under vibration — the same idea applied to a doc claim and the code it depends on.
 
 [![npm version](https://img.shields.io/npm/v/lockwire?color=blue)](https://www.npmjs.com/package/lockwire)
 [![license: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
