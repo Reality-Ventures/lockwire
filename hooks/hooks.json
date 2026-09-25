@@ -1,0 +1,33 @@
+{
+  "description": "Injects documentation claims that cover a file before it's edited, and flags claims the edit just drifted, afterward. Fails open: a broken hook never blocks the tool call — see docs/agents.md.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/cli.js", "hook", "claude-pre"],
+            "timeout": 10,
+            "statusMessage": "lockwire: checking documentation claims…"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/cli.js", "hook", "claude-post"],
+            "timeout": 10,
+            "statusMessage": "lockwire: re-checking documentation claims…"
+          }
+        ]
+      }
+    ]
+  }
+}

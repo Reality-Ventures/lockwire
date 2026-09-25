@@ -1,0 +1,77 @@
+import type { CheckResult } from "./actions.js";
+
+const VERSION = "0.1.0";
+
+export function formatText(result: CheckResult): string {
+  const lines: string[] = [];
+  const byDoc = new Map<string, typeof result.results>();
+  for (const r of result.results) {
+    const key = r.anchor.doc ?? "(lockfile-only)";
+    const list = byDoc.get(key) ?? [];
+    list.push(r);
+    byDoc.set(key, list);
+  }
+
+  for (const [doc, anchors] of byDoc) {
+    const noteworthy = anchors.filter(
+      (a) => a.status !== "fresh" && a.status !== "waived" && a.status !== "superseded",
+    );
+    if (noteworthy.length === 0) {
+      lines.push(`${doc}`, "  ok", "");
+      continue;
+    }
+    lines.push(doc);
+    for (const a of noteworthy) {
+      const t = `${a.anchor.target.path}${a.anchor.target.symbol ? `#${a.anchor.target.symbol}` : ""}`;
+      const label = a.status.toUpperCase().padEnd(9);
+      const tierNote = a.driftedTiers.length ? ` (${a.driftedTiers.join(",")})` : "";
+      lines.push(`  ${label} ${t}${tierNote}`);
+    }
+    lines.push("");
+  }
+
+  const { summary } = result;
+  lines.push(
+    `${summary.anchors} anchor${summary.anchors === 1 ? "" : "s"} · ${summary.fresh} ok · ${summary.drifted} drifted · ${summary.orphaned} orphaned`,
+  );
+  lines.push(
+    `single-hash would flag ${summary.noise.singleHashWouldFlag} · lockwire flagged ${summary.noise.tieredFlagged} · noise −${summary.noise.reductionPercent}%`,
+  );
+  return lines.join("\n");
+}
+
+export function formatJson(result: CheckResult, repo: string | null): string {
+  const payload = {
+    schema: "lockwire.check.v1",
+    tool: { name: "lockwire", version: VERSION },
+    repo,
+    checkedAt: new Date().toISOString(),
+    summary: result.summary,
+    anchors: result.results.map((r) => ({
+      id: r.anchor.id,
+      doc: r.anchor.doc,
+      line: r.anchor.claim?.line ?? null,
+      target: `${r.anchor.target.path}${r.anchor.target.symbol ? `#${r.anchor.target.symbol}` : ""}`,
+      status: r.status,
+      driftedTiers: r.driftedTiers,
+      excerpt: r.anchor.claim?.excerpt ?? null,
+    })),
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+export function formatGithub(result: CheckResult): string {
+  const lines: string[] = [];
+  for (const r of result.results) {
+    if (r.status !== "drifted" && r.status !== "orphaned") continue;
+    const target = `${r.anchor.target.path}${r.anchor.target.symbol ? `#${r.anchor.target.symbol}` : ""}`;
+    const file = r.anchor.doc ?? r.anchor.target.path;
+    const line = r.anchor.claim?.line ?? 1;
+    const message =
+      r.status === "orphaned"
+        ? `lockwire: "${target}" no longer exists — this claim is orphaned`
+        : `lockwire: "${target}" drifted on ${r.driftedTiers.join(",")} — this claim may be stale`;
+    lines.push(`::error file=${file},line=${line}::${message}`);
+  }
+  return lines.join("\n");
+}

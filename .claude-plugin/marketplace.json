@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "lockwire",
+  "description": "Documentation-claim fingerprinting for coding agents.",
+  "owner": { "name": "Reality Ventures" },
+  "plugins": [
+    {
+      "name": "lockwire",
+      "source": "./",
+      "description": "Bind documentation claims to tiered code fingerprints. Catch stale CLAUDE.md, AGENTS.md and docs at write time, with a tamper-evident history."
+    }
+  ]
+}

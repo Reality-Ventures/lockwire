@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "anchors": [
+    {
+      "id": "e8rb5adk",
+      "doc": "docs/concepts.md",
+      "claim": {
+        "line": 28,
+        "hash": "b3:15abaa39039183c05bd8c7c9463ea960",
+        "excerpt": "A fingerprint is `b3:` followed by 32 lowercase hex characters — the first 128 bits of a …"
+      },
+      "target": {
+        "path": "src/hash.ts",
+        "symbol": "fingerprint"
+      },
+      "tiers": [
+        "sig"
+      ],
+      "fingerprints": {
+        "path": "b3:fc7d17e0961f3989a5fa526b90f07cdd",
+        "sig": "b3:cddd2e7219f3a965925a3f168e1f44b5",
+        "body": "b3:67b6bc1f059e2f72d26e3b2a5147ce8d",
+        "deps": "b3:b59cd5ae65ec1d0ffc35e35b826f8d9a"
+      },
+      "linked": {
+        "at": "2026-09-25T15:49:12.643Z",
+        "commit": null,
+        "by": {
+          "type": "ai",
+          "tool": {
+            "name": "claude-code"
+          }
+        }
+      },
+      "status": "fresh",
+      "waiver": null
+    },
+    {
+      "id": "g849y7xt",
+      "doc": "docs/ledger.md",
+      "claim": {
+        "line": 30,
+        "hash": "b3:96a6073e35007a0e3bdb2d8726a33a83",
+        "excerpt": "`appendEvent` takes the repo root and an event missing its `v`, `id`, and `hash` fields, …"
+      },
+      "target": {
+        "path": "src/ledger.ts",
+        "symbol": "appendEvent"
+      },
+      "tiers": [
+        "sig"
+      ],
+      "fingerprints": {
+        "path": "b3:58a6218c217af2d48e135f75150974de",
+        "sig": "b3:5e0defe55ca129019b0d58af4ca75998",
+        "body": "b3:a286a9371dd42642d5addbb84ab7e805",
+        "deps": "b3:eaafafee3950fa6ced27f82fa3da682d"
+      },
+      "linked": {
+        "at": "2026-09-25T15:49:12.842Z",
+        "commit": null,
+        "by": {
+          "type": "ai",
+          "tool": {
+            "name": "claude-code"
+          }
+        }
+      },
+      "status": "fresh",
+      "waiver": null
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "docs": [
+    "**/*.md"
+  ],
+  "exclude": [
+    "node_modules/**",
+    "dist/**",
+    "**/CHANGELOG.md"
+  ],
+  "normalizeLocals": true,
+  "hook": {
+    "mode": "advisory",
+    "maxClaimsInContext": 8
+  },
+  "noiseBudget": {
+    "maxStalePercent": 25
+  }
+}
