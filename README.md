@@ -12,7 +12,6 @@
 
 The mark is literal, not a metaphor: [lockwiring](https://en.wikipedia.org/wiki/Lock_wire) is the aviation-maintenance technique of threading wire through two fasteners so neither can work loose under vibration — the same idea applied to a doc claim and the code it depends on.
 
-[![npm version](https://img.shields.io/npm/v/lockwire?color=blue)](https://www.npmjs.com/package/lockwire)
 [![license: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8A63D2)](https://code.claude.com/docs/en/plugins)
 [![Codex compatible](https://img.shields.io/badge/Codex-compatible-10a37f)](docs/agents.md)
@@ -176,11 +175,12 @@ sequenceDiagram
 npx skills add Reality-Ventures/lockwire
 ```
 
-**CLI and CI** — no agent required:
+**CLI and CI** — no agent required (not yet published to npm; build from source until it is):
 
 ```bash
-npm i -g lockwire
-# or: npx lockwire check
+git clone https://github.com/Reality-Ventures/lockwire && cd lockwire
+npm ci && npm run build
+node dist/cli.js check
 ```
 
 **GitHub Action** — merge-time gate:

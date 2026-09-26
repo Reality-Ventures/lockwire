@@ -9,7 +9,6 @@
   "repository": "https://github.com/Reality-Ventures/lockwire",
   "license": "MIT",
   "keywords": ["documentation", "docs-as-code", "documentation-drift", "claude-code", "codex", "mcp", "agents-md", "claude-md", "tree-sitter"],
-  "hooks": "./hooks/hooks.json",
   "mcpServers": "./.mcp.json",
   "skills": "./skills"
 }
