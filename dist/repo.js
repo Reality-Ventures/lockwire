@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 const ALWAYS_SKIP = new Set([".git", "node_modules", ".lockwire"]);
 /** Recursively lists repo-relative, posix paths, skipping `.git`/`node_modules`/`.lockwire` and anything matching `exclude`. */
@@ -71,5 +71,32 @@ export function globToRegExp(glob) {
 }
 export function matchesAny(path, globs) {
     return globs.some((g) => globToRegExp(g).test(path));
+}
+/**
+ * Best-effort check of whether `relPath` (repo-relative, no leading slash) would be excluded by
+ * the root `.gitignore`. Root-level only -- doesn't walk nested `.gitignore` files, `.git/info/
+ * exclude`, or the user's global `core.excludesFile`, since the one caller (the init-time
+ * lockwire.lock warning) only ever checks a fixed repo-root filename those can't reach. Later
+ * lines override earlier ones (including `!` re-includes), matching git's own precedence.
+ */
+export function isPathGitignored(repoRoot, relPath) {
+    const gitignorePath = join(repoRoot, ".gitignore");
+    if (!existsSync(gitignorePath))
+        return false;
+    let ignored = false;
+    for (const raw of readFileSync(gitignorePath, "utf8").split("\n")) {
+        const line = raw.trim();
+        if (!line || line.startsWith("#"))
+            continue;
+        const negate = line.startsWith("!");
+        let pattern = negate ? line.slice(1) : line;
+        if (pattern.endsWith("/"))
+            continue; // directory-only pattern; relPath is always a file here
+        if (pattern.startsWith("/"))
+            pattern = pattern.slice(1);
+        if (globToRegExp(pattern).test(relPath))
+            ignored = !negate;
+    }
+    return ignored;
 }
 //# sourceMappingURL=repo.js.map

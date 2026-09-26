@@ -20,7 +20,7 @@ import { runClaudeHook } from "./hook-claude.js";
 import { runCodexHook } from "./hook-codex.js";
 import { readLedger, verifyLedger } from "./ledger.js";
 import { readLockfile, writeLockfile } from "./lockfile.js";
-import { findRepoRoot } from "./repo.js";
+import { findRepoRoot, isPathGitignored } from "./repo.js";
 import type { Tier } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
 
@@ -74,6 +74,11 @@ async function main() {
       console.log(
         "lockwire initialized: lockwire.lock, .lockwire/config.json, .gitattributes (ledger merge=union)",
       );
+      if (isPathGitignored(repoRoot, "lockwire.lock"))
+        console.warn(
+          "warning: lockwire.lock matches a pattern in .gitignore -- it won't be committed, " +
+            "so anchors and history won't be shared with anyone else who clones this repo.",
+        );
       break;
     }
 

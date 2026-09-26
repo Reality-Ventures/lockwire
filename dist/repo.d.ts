@@ -11,4 +11,12 @@ export declare function findRepoRoot(startDir: string): string;
  */
 export declare function globToRegExp(glob: string): RegExp;
 export declare function matchesAny(path: string, globs: readonly string[]): boolean;
+/**
+ * Best-effort check of whether `relPath` (repo-relative, no leading slash) would be excluded by
+ * the root `.gitignore`. Root-level only -- doesn't walk nested `.gitignore` files, `.git/info/
+ * exclude`, or the user's global `core.excludesFile`, since the one caller (the init-time
+ * lockwire.lock warning) only ever checks a fixed repo-root filename those can't reach. Later
+ * lines override earlier ones (including `!` re-includes), matching git's own precedence.
+ */
+export declare function isPathGitignored(repoRoot: string, relPath: string): boolean;
 //# sourceMappingURL=repo.d.ts.map
