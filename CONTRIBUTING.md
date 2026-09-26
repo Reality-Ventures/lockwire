@@ -24,6 +24,10 @@ node dist/cli.js check   # lockwire checking its own docs — the repo dogfoods 
 
 CI (`.github/workflows/ci.yml`) runs all of this on Ubuntu and Windows.
 
+## Releasing
+
+Bump `version` in `package.json`, push a `vX.Y.Z` tag. `.github/workflows/release.yml` builds, tests, and publishes to npm via [trusted publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC) — no stored token. One-time npmjs.com setup: package Settings → Trusted Publisher → GitHub Actions → org `Reality-Ventures`, repo `lockwire`, workflow `release.yml`.
+
 ## Where things live
 
 | Path | What |
