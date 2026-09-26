@@ -10,7 +10,7 @@
 
 **Catch stale `CLAUDE.md`, `AGENTS.md`, and docs before your coding agent acts on them.**
 
-The mark is literal, not a metaphor: [lockwiring](https://en.wikipedia.org/wiki/Lock_wire) is the aviation-maintenance technique of threading wire through two fasteners so neither can work loose under vibration — the same idea applied to a doc claim and the code it depends on.
+The mark is literal, not a metaphor: [lockwiring](https://en.wikipedia.org/wiki/Safety_wire) is the aviation-maintenance technique of threading wire through two fasteners so neither can work loose under vibration — the same idea applied to a doc claim and the code it depends on.
 
 [![npm](https://img.shields.io/npm/v/lockwire)](https://www.npmjs.com/package/lockwire)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/lockwire)](https://bundlephobia.com/package/lockwire)
