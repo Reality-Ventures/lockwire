@@ -28,3 +28,15 @@ jobs:
       - run: npm test
       - run: npm version "$(node scripts/next-version.mjs)" --no-git-tag-version --allow-same-version
       - run: npm publish
+      # npm makes a new version visible asynchronously ("may take a few minutes"). Hold the job open
+      # until it is, so the next queued run (concurrency group above) can't compute the same version.
+      - name: Wait for the version to appear on npm
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          for _ in $(seq 90); do
+            curl -sf "https://registry.npmjs.org/$name/$version?t=$(date +%s)" >/dev/null && exit 0
+            sleep 10
+          done
+          echo "$name@$version still not visible on npm after 15 minutes" >&2
+          exit 1
