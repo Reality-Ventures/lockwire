@@ -1,8 +1,14 @@
 name: Release
 
+# Every push to main publishes to npm. The version is computed in CI (scripts/next-version.mjs) and
+# never committed back. Put [skip ci] in a commit message to push without publishing.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -20,4 +26,5 @@ jobs:
       - run: npm ci --ignore-scripts --legacy-peer-deps
       - run: npm run build
       - run: npm test
+      - run: npm version "$(node scripts/next-version.mjs)" --no-git-tag-version --allow-same-version
       - run: npm publish

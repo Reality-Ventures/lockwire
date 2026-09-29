@@ -26,7 +26,7 @@ CI (`.github/workflows/ci.yml`) runs all of this on Ubuntu and Windows.
 
 ## Releasing
 
-Bump `version` in `package.json`, push a `vX.Y.Z` tag. `.github/workflows/release.yml` builds, tests, and publishes to npm via [trusted publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC) — no stored token. One-time npmjs.com setup: package Settings → Trusted Publisher → GitHub Actions → org `Reality-Ventures`, repo `lockwire`, workflow `release.yml`.
+Every push to `main` publishes to npm. `.github/workflows/release.yml` builds, tests, and publishes via [trusted publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC) — no stored token. The version is computed in CI and never committed back: `package.json`'s `version` is published as-is if npm doesn't have it yet, otherwise the next patch above the highest published `X.Y.*` (`scripts/next-version.mjs`). Bump `version` by hand to start a new minor or major line. Put `[skip ci]` in a commit message to push without publishing. One-time npmjs.com setup: package Settings → Trusted Publisher → GitHub Actions → org `Reality-Ventures`, repo `lockwire`, workflow `release.yml`.
 
 ## Where things live
 
