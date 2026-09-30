@@ -6,6 +6,7 @@ import { fingerprint, fingerprintSet } from "./hash.js";
 import { appendEvent, historyFor, readLedger } from "./ledger.js";
 import {
   anchorsForPath,
+  lockfilePath,
   newAnchorId,
   readLockfile,
   removeAnchor,
@@ -75,11 +76,27 @@ export async function resolveTarget(
   };
 }
 
-/** Same-file rename detection: if a symbol vanished but exactly one other symbol in the file shares its `sig` fingerprint, relink to it. Cross-file relocation (the symbol moved to a different file) is not attempted in P0 — see docs/concepts.md limitations. */
-export function findRelocationCandidate(symbols: FileSymbols, missingSigFp: string): string | null {
+/**
+ * Same-file rename detection: if a symbol vanished but exactly one other symbol in the file has the
+ * same signature apart from its name, relink to it. `sig` fingerprints include the symbol's name,
+ * so each candidate is re-rendered under the missing symbol's old name before comparing -- that
+ * keeps stored fingerprints valid. Symbols already bound by another anchor are skipped, so an
+ * unrelated neighbour with the same shape isn't mistaken for the rename target. Cross-file
+ * relocation (the symbol moved to a different file) is not attempted in P0 — see docs/concepts.md limitations.
+ */
+export function findRelocationCandidate(
+  symbols: FileSymbols,
+  missingSigFp: string,
+  oldName: string,
+  taken: ReadonlySet<string> = new Set(),
+): string | null {
   const candidates: string[] = [];
   for (const [path, symbol] of symbols.bySymbolPath) {
-    if (fingerprint(symbol.sigTokens) === missingSigFp) candidates.push(path);
+    if (taken.has(path)) continue;
+    const sig = symbol.sigTokens
+      .replace(`fn ${symbol.name}(`, `fn ${oldName}(`)
+      .replace(`class ${symbol.name} [`, `class ${oldName} [`);
+    if (fingerprint(sig) === missingSigFp) candidates.push(path);
   }
   return candidates.length === 1 ? candidates[0]! : null;
 }
@@ -308,7 +325,16 @@ export async function check(
 
     if (!resolved.found && anchor.target.symbol) {
       const relocatedTo = resolved.symbols
-        ? findRelocationCandidate(resolved.symbols, anchor.fingerprints.sig)
+        ? findRelocationCandidate(
+            resolved.symbols,
+            anchor.fingerprints.sig,
+            anchor.target.symbol.slice(anchor.target.symbol.lastIndexOf(".") + 1),
+            new Set(
+              lockfile.anchors
+                .filter((a) => a.id !== anchor.id && a.target.path === anchor.target.path)
+                .flatMap((a) => (a.target.symbol ? [a.target.symbol] : [])),
+            ),
+          )
         : null;
       if (relocatedTo) {
         const reResolved = await resolveTarget(
@@ -418,7 +444,10 @@ export async function check(
     }
   }
 
-  await writeLockfile(repoRoot, current);
+  // Don't conjure an empty lockwire.lock in a directory that never had one (e.g. an MCP server
+  // rooted at a parent folder of the real repo).
+  if (lockfile.anchors.length > 0 || existsSync(lockfilePath(repoRoot)))
+    await writeLockfile(repoRoot, current);
 
   const singleHashWouldFlag = results.filter((r) => r.singleHashWouldFlag).length;
   const tieredFlagged = results.filter(

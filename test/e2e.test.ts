@@ -79,3 +79,45 @@ describe("end-to-end: the P0 falsification demo", () => {
     expect(first.summary).toEqual(second.summary);
   });
 });
+
+describe("same-file rename relocation", () => {
+  const actor = { type: "human" as const };
+
+  it("relinks a renamed function instead of orphaning it", async () => {
+    const repo = await tempRepo();
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    await writeFile(join(repo, "src", "session.ts"), SESSION_TS.replace("createSession", "openSession"), "utf8");
+
+    const { results } = await check(repo, DEFAULT_CONFIG);
+    expect(results[0]?.status).toBe("fresh");
+    expect(results[0]?.anchor.target.symbol).toBe("openSession");
+  });
+
+  it("does not relink to a look-alike symbol that another anchor already binds", async () => {
+    const repo = await tempRepo();
+    const twin = "export async function twin(userId: UserId, ttl = 3600): Promise<Session> {\n  return mint(userId);\n}\n";
+    await writeFile(join(repo, "src", "session.ts"), SESSION_TS + twin, "utf8");
+    await writeFile(
+      join(repo, "CLAUDE.md"),
+      `${CLAUDE_MD}\n<!-- lockwire src/session.ts#twin sig -->\n\`twin\` is the same shape.\n`,
+      "utf8",
+    );
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    await writeFile(join(repo, "src", "session.ts"), twin, "utf8"); // createSession deleted
+
+    const { results } = await check(repo, DEFAULT_CONFIG);
+    const gone = results.find((r) => r.anchor.target.symbol === "createSession");
+    expect(gone?.status).toBe("orphaned");
+  });
+
+  it("does not relink when two symbols could be the rename target", async () => {
+    const repo = await tempRepo();
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    const sameShape = (n: string) =>
+      `export async function ${n}(userId: UserId, ttl = 3600): Promise<Session> {\n  return mint(userId);\n}\n`;
+    await writeFile(join(repo, "src", "session.ts"), sameShape("a") + sameShape("b"), "utf8");
+
+    const { results } = await check(repo, DEFAULT_CONFIG);
+    expect(results[0]?.status).toBe("orphaned");
+  });
+});
