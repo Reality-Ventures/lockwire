@@ -10,7 +10,7 @@ export async function readLockfile(repoRoot) {
         return { version: 1, anchors: [] };
     const raw = await readFile(path, "utf8");
     if (/^<{7}( |$)/m.test(raw) && /^>{7}( |$)/m.test(raw))
-        throw new Error(`${LOCKFILE_NAME} has unresolved merge conflicts (${path}). Resolve them, keeping both sides' anchors, then run \`lockwire check\` -- it re-derives every status from the code.`);
+        throw new Error(`${LOCKFILE_NAME} has unresolved merge conflicts (${path}). Resolve them (either side is fine), then run \`lockwire check\` -- it re-derives every status from the code -- and \`lockwire ack\` anything it flags.`);
     let parsed;
     try {
         parsed = JSON.parse(raw);

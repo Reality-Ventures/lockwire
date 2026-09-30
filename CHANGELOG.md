@@ -20,6 +20,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 - Same-file rename detection never fired for renamed functions or classes, because `sig` fingerprints include the name. Candidates are now compared under the old name, and symbols already bound by another anchor are skipped.
 - `lockwire check` no longer creates an empty `lockwire.lock` in a folder that has none, and the MCP tools say so instead of returning `[]` when they are rooted at such a folder.
+- A `lockwire.lock` with unresolved git merge conflicts now fails with a message that says so and how to recover, instead of a bare JSON parse error.
 
 ### Known limitations (see [docs/concepts.md](docs/concepts.md#limitations))
 
