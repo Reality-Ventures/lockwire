@@ -12,7 +12,16 @@ export async function readLockfile(repoRoot: string): Promise<Lockfile> {
   const path = lockfilePath(repoRoot);
   if (!existsSync(path)) return { version: 1, anchors: [] };
   const raw = await readFile(path, "utf8");
-  const parsed = JSON.parse(raw) as Lockfile;
+  if (/^<{7}( |$)/m.test(raw) && /^>{7}( |$)/m.test(raw))
+    throw new Error(
+      `${LOCKFILE_NAME} has unresolved merge conflicts (${path}). Resolve them, keeping both sides' anchors, then run \`lockwire check\` -- it re-derives every status from the code.`,
+    );
+  let parsed: Lockfile;
+  try {
+    parsed = JSON.parse(raw) as Lockfile;
+  } catch (err) {
+    throw new Error(`${LOCKFILE_NAME} is not valid JSON (${path}): ${(err as Error).message}`);
+  }
   return { version: 1, anchors: parsed.anchors ?? [] };
 }
 

@@ -9,7 +9,15 @@ export async function readLockfile(repoRoot) {
     if (!existsSync(path))
         return { version: 1, anchors: [] };
     const raw = await readFile(path, "utf8");
-    const parsed = JSON.parse(raw);
+    if (/^<{7}( |$)/m.test(raw) && /^>{7}( |$)/m.test(raw))
+        throw new Error(`${LOCKFILE_NAME} has unresolved merge conflicts (${path}). Resolve them, keeping both sides' anchors, then run \`lockwire check\` -- it re-derives every status from the code.`);
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch (err) {
+        throw new Error(`${LOCKFILE_NAME} is not valid JSON (${path}): ${err.message}`);
+    }
     return { version: 1, anchors: parsed.anchors ?? [] };
 }
 export async function writeLockfile(repoRoot, lockfile) {
