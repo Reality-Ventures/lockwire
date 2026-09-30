@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -154,5 +155,19 @@ describe("MCP server tools", () => {
     });
     const parsed = JSON.parse(firstText(result as never));
     expect(parsed.status).toBe("waived");
+  });
+
+  it("explains a missing lockwire.lock instead of returning an empty list, and never creates one", async () => {
+    const bare = await mkdtemp(join(tmpdir(), "lockwire-mcp-bare-"));
+    const client = await connectedClient(bare);
+    for (const [name, args] of [
+      ["lockwire_status", {}],
+      ["lockwire_refs", { path: "src/session.ts" }],
+      ["lockwire_verify", { doc: "CLAUDE.md" }],
+    ] as const) {
+      const result = await client.callTool({ name, arguments: args });
+      expect(firstText(result as never)).toContain("No lockwire.lock found");
+    }
+    expect(existsSync(join(bare, "lockwire.lock"))).toBe(false);
   });
 });

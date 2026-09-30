@@ -1,8 +1,10 @@
+import { existsSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { ack, check, history, linkDoc, refs, status, waive } from "./actions.js";
 import { readConfig } from "./config.js";
+import { lockfilePath } from "./lockfile.js";
 function text(payload) {
     return {
         content: [
@@ -12,6 +14,12 @@ function text(payload) {
             },
         ],
     };
+}
+/** Without this, a server rooted at the wrong folder answers every query with an indistinguishable `[]`. */
+function missingLockNote(repoRoot) {
+    if (existsSync(lockfilePath(repoRoot)))
+        return undefined;
+    return `No lockwire.lock found in ${repoRoot}. This MCP server is rooted at the folder the session started in; start the session from the repository root (or run \`lockwire init\` there).`;
 }
 /** Builds the configured server without connecting a transport -- split out from startMcpServer so tests can drive it over an in-memory transport instead of real stdio. */
 export function createServer(repoRoot) {
@@ -30,7 +38,7 @@ export function createServer(repoRoot) {
             idempotentHint: true,
             openWorldHint: false,
         },
-    }, async ({ path, symbol }) => text(await refs(repoRoot, path, symbol)));
+    }, async ({ path, symbol }) => text(missingLockNote(repoRoot) ?? (await refs(repoRoot, path, symbol))));
     server.registerTool("lockwire_refs", {
         title: "Reverse lookup",
         description: "Which documentation claims reference this file or symbol.",
@@ -41,7 +49,7 @@ export function createServer(repoRoot) {
             idempotentHint: true,
             openWorldHint: false,
         },
-    }, async ({ path, symbol }) => text(await refs(repoRoot, path, symbol)));
+    }, async ({ path, symbol }) => text(missingLockNote(repoRoot) ?? (await refs(repoRoot, path, symbol))));
     server.registerTool("lockwire_status", {
         title: "Anchor status",
         description: "Current status of every anchor, optionally filtered by a glob scope.",
@@ -52,7 +60,7 @@ export function createServer(repoRoot) {
             idempotentHint: true,
             openWorldHint: false,
         },
-    }, async ({ scope }) => text(await status(repoRoot, scope)));
+    }, async ({ scope }) => text(missingLockNote(repoRoot) ?? (await status(repoRoot, scope))));
     server.registerTool("lockwire_verify", {
         title: "Verify a doc",
         description: "Check one document's anchors before committing it.",
@@ -68,6 +76,9 @@ export function createServer(repoRoot) {
             openWorldHint: false,
         },
     }, async ({ doc }) => {
+        const note = missingLockNote(repoRoot);
+        if (note)
+            return text(note);
         const config = await readConfig(repoRoot);
         const result = await check(repoRoot, config);
         return text(result.results.filter((r) => r.anchor.doc === doc));
@@ -82,7 +93,7 @@ export function createServer(repoRoot) {
             idempotentHint: true,
             openWorldHint: false,
         },
-    }, async ({ ref }) => text(await history(repoRoot, ref)));
+    }, async ({ ref }) => text(missingLockNote(repoRoot) ?? (await history(repoRoot, ref))));
     server.registerTool("lockwire_link", {
         title: "Create or refresh an anchor",
         description: "Scan a doc for lockwire markers and stamp fresh fingerprints.",

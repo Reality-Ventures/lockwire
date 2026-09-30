@@ -16,6 +16,11 @@ All notable changes to this project are documented here. Format follows [Keep a 
 - Time-boxed waivers with expiry, and a relink gate requiring `--reviewed` to re-stamp a currently-drifted anchor.
 - GitHub Action (`action.yml`) for merge-time enforcement.
 
+### Fixed
+
+- Same-file rename detection never fired for renamed functions or classes, because `sig` fingerprints include the name. Candidates are now compared under the old name, and symbols already bound by another anchor are skipped.
+- `lockwire check` no longer creates an empty `lockwire.lock` in a folder that has none, and the MCP tools say so instead of returning `[]` when they are rooted at such a folder.
+
 ### Known limitations (see [docs/concepts.md](docs/concepts.md#limitations))
 
 - Local-variable normalization does not perform real lexical scope analysis.

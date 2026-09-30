@@ -1,8 +1,10 @@
+import { existsSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { ack, check, history, linkDoc, refs, status, waive } from "./actions.js";
 import { readConfig } from "./config.js";
+import { lockfilePath } from "./lockfile.js";
 
 function text(payload: unknown) {
   return {
@@ -13,6 +15,12 @@ function text(payload: unknown) {
       },
     ],
   };
+}
+
+/** Without this, a server rooted at the wrong folder answers every query with an indistinguishable `[]`. */
+function missingLockNote(repoRoot: string): string | undefined {
+  if (existsSync(lockfilePath(repoRoot))) return undefined;
+  return `No lockwire.lock found in ${repoRoot}. This MCP server is rooted at the folder the session started in; start the session from the repository root (or run \`lockwire init\` there).`;
 }
 
 /** Builds the configured server without connecting a transport -- split out from startMcpServer so tests can drive it over an in-memory transport instead of real stdio. */
@@ -38,7 +46,8 @@ export function createServer(repoRoot: string): McpServer {
         openWorldHint: false,
       },
     },
-    async ({ path, symbol }) => text(await refs(repoRoot, path, symbol)),
+    async ({ path, symbol }) =>
+      text(missingLockNote(repoRoot) ?? (await refs(repoRoot, path, symbol))),
   );
 
   server.registerTool(
@@ -54,7 +63,8 @@ export function createServer(repoRoot: string): McpServer {
         openWorldHint: false,
       },
     },
-    async ({ path, symbol }) => text(await refs(repoRoot, path, symbol)),
+    async ({ path, symbol }) =>
+      text(missingLockNote(repoRoot) ?? (await refs(repoRoot, path, symbol))),
   );
 
   server.registerTool(
@@ -70,7 +80,7 @@ export function createServer(repoRoot: string): McpServer {
         openWorldHint: false,
       },
     },
-    async ({ scope }) => text(await status(repoRoot, scope)),
+    async ({ scope }) => text(missingLockNote(repoRoot) ?? (await status(repoRoot, scope))),
   );
 
   server.registerTool(
@@ -91,6 +101,8 @@ export function createServer(repoRoot: string): McpServer {
       },
     },
     async ({ doc }) => {
+      const note = missingLockNote(repoRoot);
+      if (note) return text(note);
       const config = await readConfig(repoRoot);
       const result = await check(repoRoot, config);
       return text(result.results.filter((r) => r.anchor.doc === doc));
@@ -111,7 +123,7 @@ export function createServer(repoRoot: string): McpServer {
         openWorldHint: false,
       },
     },
-    async ({ ref }) => text(await history(repoRoot, ref)),
+    async ({ ref }) => text(missingLockNote(repoRoot) ?? (await history(repoRoot, ref))),
   );
 
   server.registerTool(

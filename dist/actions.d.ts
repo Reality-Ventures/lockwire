@@ -9,8 +9,15 @@ export declare function resolveTarget(repoRoot: string, target: {
     path: string;
     symbol?: string;
 }, config: LockwireConfig): Promise<TargetResolution | null>;
-/** Same-file rename detection: if a symbol vanished but exactly one other symbol in the file shares its `sig` fingerprint, relink to it. Cross-file relocation (the symbol moved to a different file) is not attempted in P0 — see docs/concepts.md limitations. */
-export declare function findRelocationCandidate(symbols: FileSymbols, missingSigFp: string): string | null;
+/**
+ * Same-file rename detection: if a symbol vanished but exactly one other symbol in the file has the
+ * same signature apart from its name, relink to it. `sig` fingerprints include the symbol's name,
+ * so each candidate is re-rendered under the missing symbol's old name before comparing -- that
+ * keeps stored fingerprints valid. Symbols already bound by another anchor are skipped, so an
+ * unrelated neighbour with the same shape isn't mistaken for the rename target. Cross-file
+ * relocation (the symbol moved to a different file) is not attempted in P0 — see docs/concepts.md limitations.
+ */
+export declare function findRelocationCandidate(symbols: FileSymbols, missingSigFp: string, oldName: string, taken?: ReadonlySet<string>): string | null;
 export interface LinkResult {
     created: number;
     refreshed: number;

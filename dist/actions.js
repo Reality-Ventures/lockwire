@@ -4,7 +4,7 @@ import { computeWholeFileTiers, extractFileSymbols, fileExportsFingerprint } fro
 import { langForPath, parserFor } from "./grammar.js";
 import { fingerprint, fingerprintSet } from "./hash.js";
 import { appendEvent, historyFor, readLedger } from "./ledger.js";
-import { anchorsForPath, newAnchorId, readLockfile, removeAnchor, upsertAnchor, writeLockfile, } from "./lockfile.js";
+import { anchorsForPath, lockfilePath, newAnchorId, readLockfile, removeAnchor, upsertAnchor, writeLockfile, } from "./lockfile.js";
 import { scanMarkers, stampMarkerLine } from "./markers.js";
 import { globToRegExp, matchesAny, toRepoRelative, walkFiles } from "./repo.js";
 import { ALL_TIERS } from "./types.js";
@@ -51,11 +51,23 @@ export async function resolveTarget(repoRoot, target, config) {
         symbols,
     };
 }
-/** Same-file rename detection: if a symbol vanished but exactly one other symbol in the file shares its `sig` fingerprint, relink to it. Cross-file relocation (the symbol moved to a different file) is not attempted in P0 — see docs/concepts.md limitations. */
-export function findRelocationCandidate(symbols, missingSigFp) {
+/**
+ * Same-file rename detection: if a symbol vanished but exactly one other symbol in the file has the
+ * same signature apart from its name, relink to it. `sig` fingerprints include the symbol's name,
+ * so each candidate is re-rendered under the missing symbol's old name before comparing -- that
+ * keeps stored fingerprints valid. Symbols already bound by another anchor are skipped, so an
+ * unrelated neighbour with the same shape isn't mistaken for the rename target. Cross-file
+ * relocation (the symbol moved to a different file) is not attempted in P0 — see docs/concepts.md limitations.
+ */
+export function findRelocationCandidate(symbols, missingSigFp, oldName, taken = new Set()) {
     const candidates = [];
     for (const [path, symbol] of symbols.bySymbolPath) {
-        if (fingerprint(symbol.sigTokens) === missingSigFp)
+        if (taken.has(path))
+            continue;
+        const sig = symbol.sigTokens
+            .replace(`fn ${symbol.name}(`, `fn ${oldName}(`)
+            .replace(`class ${symbol.name} [`, `class ${oldName} [`);
+        if (fingerprint(sig) === missingSigFp)
             candidates.push(path);
     }
     return candidates.length === 1 ? candidates[0] : null;
@@ -228,7 +240,9 @@ export async function check(repoRoot, config, onlyPaths) {
         }
         if (!resolved.found && anchor.target.symbol) {
             const relocatedTo = resolved.symbols
-                ? findRelocationCandidate(resolved.symbols, anchor.fingerprints.sig)
+                ? findRelocationCandidate(resolved.symbols, anchor.fingerprints.sig, anchor.target.symbol.slice(anchor.target.symbol.lastIndexOf(".") + 1), new Set(lockfile.anchors
+                    .filter((a) => a.id !== anchor.id && a.target.path === anchor.target.path)
+                    .flatMap((a) => (a.target.symbol ? [a.target.symbol] : []))))
                 : null;
             if (relocatedTo) {
                 const reResolved = await resolveTarget(repoRoot, { path: anchor.target.path, symbol: relocatedTo }, config);
@@ -330,7 +344,10 @@ export async function check(repoRoot, config, onlyPaths) {
             }
         }
     }
-    await writeLockfile(repoRoot, current);
+    // Don't conjure an empty lockwire.lock in a directory that never had one (e.g. an MCP server
+    // rooted at a parent folder of the real repo).
+    if (lockfile.anchors.length > 0 || existsSync(lockfilePath(repoRoot)))
+        await writeLockfile(repoRoot, current);
     const singleHashWouldFlag = results.filter((r) => r.singleHashWouldFlag).length;
     const tieredFlagged = results.filter((r) => r.status === "drifted" || r.status === "orphaned").length;
     const reductionPercent = singleHashWouldFlag === 0
