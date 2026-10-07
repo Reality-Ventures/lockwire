@@ -127,9 +127,15 @@ function flatten(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-function excerpt(text: string, max = 90): string {
+export const EXCERPT_MAX = 90;
+
+function excerpt(text: string, max = EXCERPT_MAX): string {
   const flat = flatten(text);
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+  if (flat.length <= max) return flat;
+  let cut = flat.slice(0, max - 1);
+  // Don't leave half of a surrogate pair (an emoji) dangling at the cut.
+  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
+  return `${cut}…`;
 }
 
 /**
@@ -140,7 +146,10 @@ function excerpt(text: string, max = 90): string {
 export function claimUnchanged(stored: AnchorClaim, current: DocMarker): boolean {
   if (stored.normHash) return current.claimNormHash === stored.normHash;
   if (current.claimHash === stored.hash) return true;
-  return !stored.excerpt.endsWith("…") && current.claimExcerpt === stored.excerpt;
+  // An excerpt only holds the whole claim if it wasn't cut short. Cut-short excerpts are always
+  // (almost) full length and end in an ellipsis, so a short claim that merely ends in "…" still counts.
+  const truncated = stored.excerpt.endsWith("…") && stored.excerpt.length >= EXCERPT_MAX - 2;
+  return !truncated && current.claimExcerpt === stored.excerpt;
 }
 
 /** Rewrites a marker line to carry its stamped id, preserving any tier spec already present and whatever precedes the marker (indentation, a BOM). */

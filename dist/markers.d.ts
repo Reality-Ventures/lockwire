@@ -14,6 +14,7 @@ export interface DocMarker {
 }
 /** Scans a markdown document's text for `<!-- lockwire <target> [tiers] [id=<id>] -->` markers. */
 export declare function scanMarkers(text: string): DocMarker[];
+export declare const EXCERPT_MAX = 90;
 /**
  * Whether the claim sentence an anchor was stamped against is still the one in the doc. Whitespace
  * and line-wrapping changes don't count. Anchors linked before `normHash` existed fall back to the

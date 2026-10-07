@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { check, linkDoc, waive } from "../src/actions.js";
+import { ack, check, linkDoc, waive } from "../src/actions.js";
 import { DEFAULT_CONFIG } from "../src/types.js";
 
 const SESSION_TS = `export async function createSession(userId: UserId, ttl = 3600): Promise<Session> {
@@ -377,5 +377,103 @@ describe("stacked markers and the relocated count", () => {
     );
     const second = await check(repo, DEFAULT_CONFIG);
     expect(second.summary).toMatchObject({ relocated: 1, drifted: 1 });
+  });
+});
+
+describe("duplicate ids, lapsed waivers and ack", () => {
+  const actor = { type: "human" as const };
+  const marker = (id: string) => `<!-- lockwire src/session.ts#createSession sig id=${id} -->`;
+
+  it("the same id twice in one doc: the second marker gets its own anchor, and neither drifts", async () => {
+    const repo = await tempRepo();
+    await writeFile(
+      join(repo, "CLAUDE.md"),
+      `# A\n\n${marker("DUPE0001")}\nFirst claim.\n\n${marker("DUPE0001")}\nSecond, different claim.\n`,
+      "utf8",
+    );
+    const result = await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    expect(result.created).toBe(1);
+    const stampedDoc = await readFile(join(repo, "CLAUDE.md"), "utf8");
+    expect(stampedDoc.match(/id=DUPE0001/g)).toHaveLength(1);
+    const { summary } = await check(repo, DEFAULT_CONFIG);
+    expect(summary).toMatchObject({ anchors: 2, drifted: 0 });
+  });
+
+  async function waivedAndLapsed(repo: string) {
+    const lockPath = join(repo, "lockwire.lock");
+    const lock = JSON.parse(await readFile(lockPath, "utf8"));
+    Object.assign(lock.anchors[0], {
+      status: "waived",
+      waiver: { reason: "temporary", expires: "2001-01-01T00:00:00.000Z", by: actor },
+    });
+    await writeFile(lockPath, JSON.stringify(lock), "utf8");
+  }
+
+  it("a lapsed waiver on unchanged code goes back to fresh, and consecutive checks agree", async () => {
+    const repo = await tempRepo();
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    await waivedAndLapsed(repo);
+    const first = (await check(repo, DEFAULT_CONFIG)).results[0]!;
+    const second = (await check(repo, DEFAULT_CONFIG)).results[0]!;
+    expect(first.status).toBe("fresh");
+    expect(second.status).toBe("fresh");
+    expect(first.anchor.waiver).toBeNull();
+  });
+
+  it("a lapsed waiver on code that really drifted while it was waived is reported as drifted, once", async () => {
+    const repo = await tempRepo();
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    await waivedAndLapsed(repo);
+    await writeFile(
+      join(repo, "src", "session.ts"),
+      SESSION_TS.replace("ttl = 3600", "ttl = 3600, extra = 1"),
+      "utf8",
+    );
+    const first = (await check(repo, DEFAULT_CONFIG)).results[0]!;
+    expect(first.status).toBe("drifted");
+    expect(first.driftedTiers).toEqual(["sig"]);
+    expect((await check(repo, DEFAULT_CONFIG)).results[0]?.status).toBe("drifted");
+    const ledger = await readFile(join(repo, ".lockwire", "ledger.jsonl"), "utf8");
+    expect(ledger.match(/waiver\.expired/g)).toHaveLength(1);
+    expect(ledger.match(/anchor\.drifted/g)).toHaveLength(1);
+  });
+
+  it("ack refuses to re-stamp a target that no longer exists instead of storing empty fingerprints", async () => {
+    const repo = await tempRepo();
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    await writeFile(join(repo, "src", "session.ts"), "export const other = 1;\n", "utf8");
+    const [r] = (await check(repo, DEFAULT_CONFIG)).results;
+    expect(r?.status).toBe("orphaned");
+    const id = r!.anchor.id;
+    for (const resolution of ["updated", "false-positive"] as const)
+      await expect(ack(repo, id, resolution, undefined, actor, DEFAULT_CONFIG)).rejects.toThrow(
+        /no longer exists/,
+      );
+    const lock = JSON.parse(await readFile(join(repo, "lockwire.lock"), "utf8"));
+    expect(lock.anchors[0].fingerprints.sig).toMatch(/^b3:/);
+    // "superseded" is still the way out, and so is unlinking.
+    expect((await ack(repo, id, "superseded", undefined, actor, DEFAULT_CONFIG)).status).toBe("superseded");
+  });
+
+  it("ack accepts an edited claim, so an expected claim edit stops being flagged", async () => {
+    const repo = await tempRepo();
+    await writeFile(
+      join(repo, "CLAUDE.md"),
+      `# A\n\n${marker("ACK00001")}\nOriginal sentence.\n`,
+      "utf8",
+    );
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    await writeFile(
+      join(repo, "CLAUDE.md"),
+      `# A\n\n${marker("ACK00001")}\nReworded sentence.\n`,
+      "utf8",
+    );
+    expect((await check(repo, DEFAULT_CONFIG)).results[0]?.claimChanged).toBe(true);
+
+    const acked = await ack(repo, "ACK00001", "false-positive", "just a rewording", actor, DEFAULT_CONFIG);
+    expect(acked.claim?.excerpt).toBe("Reworded sentence.");
+    const after = (await check(repo, DEFAULT_CONFIG)).results[0]!;
+    expect(after.status).toBe("fresh");
+    expect(after.claimChanged).toBeUndefined();
   });
 });

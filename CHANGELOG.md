@@ -18,6 +18,11 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Fixed
 
+- `lockwire ack` (`updated` / `false-positive`) on an anchor whose target no longer exists stored empty fingerprints and marked it fresh. It now refuses and points at `--resolution superseded` or `lockwire unlink`. `ack` also re-stamps the claim from the doc, so an expected claim edit stops being flagged (previously only `link` did that, though the hook message suggested `ack`).
+- A waiver that lapsed was reported as `drifted` on every tier regardless of the code, then flipped to fresh on the next check. A lapsed waiver now simply stops suppressing and the anchor is evaluated from the code: fresh if nothing moved, drifted (with the real tiers) if something did.
+- The same marker id twice in one doc silently produced a false drift right after `link`. The second marker now gets its own id.
+- Claim excerpts could cut an emoji in half (invalid UTF-16) when truncating, and a legacy anchor whose short claim ended in a literal `…` was treated as a truncated excerpt, so a pure re-wrap flagged it.
+- `**/` in globs matched part of a path segment (`src/**/test.md` matched `src/xtest.md`). It now means zero or more whole directories. The default `docs`/`exclude` globs match exactly the same files as before.
 - Two markers stacked above one sentence swallowed each other: the first marker's claim text included the second marker's line, so stamping an id into the second changed the first's claim hash and `check` then reported it as `drifted (claim)`. Stacked markers now all bind the sentence beneath them, and a marker line ends the paragraph above it. A stacked anchor stamped by an earlier version shows claim drift once; `lockwire link <doc>` re-stamps it.
 - `summary.relocated` was hardcoded to 0. It now counts the anchors relocated in that run (text output adds `· N relocated` when non-zero).
 - Stamping a marker (`lockwire link`) rewrote every CRLF in the doc to LF, producing a whole-file diff on Windows. Each line's own terminator is now preserved, and stamping changes only the marker line. Stamping also keeps whatever precedes the marker on its line, such as list-item indentation or a leading BOM.

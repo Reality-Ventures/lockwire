@@ -125,6 +125,7 @@ export async function linkDoc(
   const parts = text.split(/(\r?\n)/);
   let docChanged = false;
   let current = lockfile;
+  const idsSeenInDoc = new Set<string>();
 
   for (const marker of markers) {
     const targetLabel = `${marker.target.path}${marker.target.symbol ? `#${marker.target.symbol}` : ""}`;
@@ -134,6 +135,11 @@ export async function linkDoc(
     // holds that marker, this is a second claim, not the same one moved -- binding it to the
     // existing anchor would silently stop checking the original sentence.
     let copiedId = false;
+    // The same id twice in one doc (a duplicated marker) is a copy too: the second one gets its own.
+    if (marker.id && idsSeenInDoc.has(marker.id)) {
+      copiedId = true;
+      existing = undefined;
+    }
     if (existing?.doc && existing.doc !== docPath) {
       const originalPath = `${repoRoot}/${existing.doc}`;
       const stillThere =
@@ -178,6 +184,8 @@ export async function linkDoc(
       marker.tiers ?? (marker.target.symbol ? (["sig"] as Tier[]) : (["path", "body"] as Tier[]));
     const isNew = !marker.id || copiedId;
     const id = isNew || !marker.id ? newAnchorId() : marker.id;
+    idsSeenInDoc.add(id);
+    if (marker.id) idsSeenInDoc.add(marker.id);
     const anchor: Anchor = {
       id,
       doc: docPath,
@@ -308,7 +316,8 @@ export async function check(
     return docMarkers.get(doc) ?? null;
   }
 
-  for (const anchor of lockfile.anchors) {
+  for (const stored of lockfile.anchors) {
+    let anchor = stored;
     const inScope =
       !onlyPaths ||
       onlyPaths.includes(anchor.target.path) ||
@@ -329,18 +338,14 @@ export async function check(
           actor: { type: "unknown" },
           commit: null,
         });
-        const reverted: Anchor = { ...anchor, status: "drifted", waiver: null };
-        current = upsertAnchor(current, reverted);
-        results.push({
-          anchor: reverted,
-          status: "drifted",
-          driftedTiers: anchor.tiers,
-          singleHashWouldFlag: true,
-        });
+        // A lapsed waiver just stops suppressing: re-evaluate the anchor from the code like any other,
+        // so it's drifted only if something actually moved while it was waived.
+        anchor = { ...anchor, status: "fresh", waiver: null };
+        current = upsertAnchor(current, anchor);
       } else {
         results.push({ anchor, status: "waived", driftedTiers: [], singleHashWouldFlag: false });
+        continue;
       }
-      continue;
     }
 
     if (anchor.status === "superseded") {
@@ -619,12 +624,32 @@ export async function ack(
   if (resolution === "superseded") {
     updated = { ...anchor, status: "superseded" };
   } else {
-    const resolved = await resolveTarget(repoRoot, anchor.target, config);
-    updated = {
-      ...anchor,
-      status: "fresh",
-      fingerprints: resolved?.fingerprints ?? anchor.fingerprints,
-    };
+    let resolved: TargetResolution | null = null;
+    try {
+      resolved = await resolveTarget(repoRoot, anchor.target, config);
+    } catch {
+      // handled below, same as a target that isn't there
+    }
+    if (!resolved?.found)
+      throw new Error(
+        `can't mark ${anchorId} ${resolution}: ${anchor.target.path}${anchor.target.symbol ? `#${anchor.target.symbol}` : ""} no longer exists. Use --resolution superseded, or \`lockwire unlink ${anchorId}\`.`,
+      );
+
+    // Acknowledging also accepts the claim as it reads now, so an expected claim edit stops being flagged.
+    let claim = anchor.claim;
+    if (anchor.doc && anchor.claim && existsSync(`${repoRoot}/${anchor.doc}`)) {
+      const marker = scanMarkers(await readFile(`${repoRoot}/${anchor.doc}`, "utf8")).find(
+        (m) => m.id === anchor.id,
+      );
+      if (marker)
+        claim = {
+          line: marker.claimLine,
+          hash: marker.claimHash,
+          normHash: marker.claimNormHash,
+          excerpt: marker.claimExcerpt,
+        };
+    }
+    updated = { ...anchor, status: "fresh", fingerprints: resolved.fingerprints, claim };
   }
 
   await writeLockfile(repoRoot, upsertAnchor(lockfile, updated));
