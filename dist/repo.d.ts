@@ -11,9 +11,9 @@ export declare function toRepoRelative(repoRoot: string, absPath: string): strin
  * `cwd`. A result starting with `..` means the path is outside the repo.
  */
 export declare function toRepoPath(repoRoot: string, input: string, cwd?: string): string;
-/** Walk up from `startDir` looking for `lockwire.lock` or a `.git` entry; undefined if neither exists above it. */
+/** Walk up from `startDir` to the nearest folder holding `lockwire.lock` or `.git` (nearest wins, so a stray lockfile in a parent can't capture a nested project); undefined if there is none. */
 export declare function tryFindRepoRoot(startDir: string): string | undefined;
-/** Walk up from `startDir` looking for `lockwire.lock`, falling back to a `.git` directory, falling back to `startDir`. */
+/** The nearest `lockwire.lock`/`.git` ancestor of `startDir`, or `startDir` itself. */
 export declare function findRepoRoot(startDir: string): string;
 /**
  * A small, dependency-free glob matcher: `**` matches across path separators, `*` matches within

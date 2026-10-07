@@ -46,7 +46,7 @@ The fingerprint only covers half of the contract. The anchor also stores a hash 
 
 - **Sentence rewritten** → `drifted`, shown as `(claim)`. The code hasn't moved, but the claim is no longer the one anyone verified against it. Re-verify it, then `lockwire link <doc>` re-stamps it — no `--reviewed` needed when only the sentence changed.
 - **Marker deleted (or the doc removed)** → `orphaned`. Use `lockwire unlink <id>` for a deliberate removal, or restore the marker and re-link.
-- **Re-wrapping or reformatting** the sentence is ignored. Anchors linked before `normHash` existed fall back to the raw hash, and to the stored excerpt for short claims, so upgrading doesn't flag them.
+- **Re-wrapping or reformatting** the sentence is ignored. Anchors linked before `normHash` existed fall back to the raw hash, and to the stored excerpt for short claims, so upgrading doesn't flag them; the first `check` that finds such a claim unchanged records its `normHash`, so from then on a re-wrap of even a long claim is harmless.
 
 This still isn't a truth check: a sentence can be edited into something false while the code matches. It makes edits to a bound claim visible and forces a re-verification, nothing more.
 

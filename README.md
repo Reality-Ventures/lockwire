@@ -127,7 +127,7 @@ stateDiagram-v2
     Waived --> Fresh: waiver expires, nothing moved
     Waived --> Drifted: waiver expires, something moved<br/><i>waiver.expired</i>
 
-    Orphaned --> Fresh: marker or symbol restored,<br/>then link
+    Orphaned --> Fresh: marker or symbol restored,<br/>then link (--reviewed if the code changed)
 
     Superseded --> [*]
 

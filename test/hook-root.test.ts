@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -66,5 +66,46 @@ describe("hook root discovery", () => {
     await writeFile(join(repo, "src", "a.ts"), A_TS.replace("x + 1", "x + 9"), "utf8");
     const post = run("claude-post");
     expect(post.stdout).toContain("drifted");
+  });
+});
+
+describe("repo root precedence: the nearest lockwire.lock or .git wins", () => {
+  async function tree() {
+    const outer = await mkdtemp(join(tmpdir(), "lockwire-prec-"));
+    await writeFile(join(outer, "lockwire.lock"), '{"version":1,"anchors":[]}', "utf8"); // a stray lockfile
+    const inner = join(outer, "project");
+    await mkdir(join(inner, "src"), { recursive: true });
+    await mkdir(join(inner, ".git"));
+    await writeFile(join(inner, "src", "a.ts"), "export const a = 1;\n", "utf8");
+    return { outer, inner };
+  }
+
+  it("a stray lockwire.lock above a project with its own .git doesn't capture it", async () => {
+    const { outer, inner } = await tree();
+    expect(tryFindRepoRoot(join(inner, "src"))).toBe(inner);
+    expect(resolveHookRoot(outer, { cwd: outer }, join(inner, "src", "a.ts"))).toBe(inner);
+  });
+
+  it("`lockwire init` in that project creates its own lockfile and leaves the stray one alone", async () => {
+    if (!existsSync(CLI)) return;
+    const { outer, inner } = await tree();
+    const before = readFileSync(join(outer, "lockwire.lock"), "utf8");
+    const r = spawnSync(process.execPath, [CLI, "init"], { cwd: join(inner, "src"), encoding: "utf8" });
+    expect(r.status).toBe(0);
+    expect(existsSync(join(inner, "lockwire.lock"))).toBe(true);
+    expect(readFileSync(join(outer, "lockwire.lock"), "utf8")).toBe(before);
+  });
+
+  it("with no .git or lockfile in between, the outer lockfile still applies to a plain subfolder", async () => {
+    const { outer } = await tree();
+    await mkdir(join(outer, "plain", "deep"), { recursive: true });
+    expect(tryFindRepoRoot(join(outer, "plain", "deep"))).toBe(outer);
+  });
+
+  it("a nested project that has its own lockwire.lock keeps it", async () => {
+    const { outer, inner } = await tree();
+    await writeFile(join(inner, "lockwire.lock"), '{"version":1,"anchors":[]}', "utf8");
+    expect(tryFindRepoRoot(join(inner, "src"))).toBe(inner);
+    expect(outer).not.toBe(inner);
   });
 });

@@ -161,3 +161,16 @@ export function stampMarkerLine(line: string, id: string): string {
   tokens.push(`id=${id}`);
   return `${prefix}<!-- lockwire ${tokens.join(" ")} -->`;
 }
+
+/** Rewrites a marker line's target (`path#Symbol`), keeping its tiers, id and whatever precedes it. */
+export function retargetMarkerLine(
+  line: string,
+  target: { path: string; symbol?: string },
+): string {
+  const m = MARKER_RE.exec(line.trim());
+  if (!m) return line;
+  const prefix = /^\s*/.exec(line)?.[0] ?? "";
+  const tokens = (m[1] ?? "").split(/\s+/).filter(Boolean);
+  tokens[0] = `${target.path}${target.symbol ? `#${target.symbol}` : ""}`;
+  return `${prefix}<!-- lockwire ${tokens.join(" ")} -->`;
+}

@@ -515,3 +515,107 @@ describe("scoped checks and dry runs", () => {
     expect(await readFile(join(repo, "lockwire.lock"), "utf8")).not.toBe(lockBefore);
   });
 });
+
+describe("relinking after a rename, orphans coming back, and legacy claim hashes", () => {
+  const actor = { type: "human" as const };
+  const marker = (target: string, rest = "") => `<!-- lockwire ${target}${rest} -->`;
+  const doc = (m: string, sentence = "It creates a session.") => `# A\n\n${m}\n${sentence}\n`;
+
+  it("`link` follows a relocated anchor and rewrites the marker, keeping its tiers and id", async () => {
+    const repo = await tempRepo();
+    await writeFile(
+      join(repo, "CLAUDE.md"),
+      doc(marker("src/session.ts#createSession", " sig,body id=RELOC001")),
+      "utf8",
+    );
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    await writeFile(join(repo, "src", "session.ts"), SESSION_TS.replace("createSession", "openSession"), "utf8");
+    expect((await check(repo, DEFAULT_CONFIG)).summary.relocated).toBe(1);
+
+    const relinked = await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    expect(relinked.skipped).toEqual([]);
+    expect(relinked.refreshed).toBe(1);
+    expect(await readFile(join(repo, "CLAUDE.md"), "utf8")).toContain(
+      marker("src/session.ts#openSession", " sig,body id=RELOC001"),
+    );
+    const { results, summary } = await check(repo, DEFAULT_CONFIG);
+    expect(summary).toMatchObject({ anchors: 1, drifted: 0, orphaned: 0 });
+    expect(results[0]?.anchor.target.symbol).toBe("openSession");
+    // ...and it's recorded, and stable on a second link.
+    const ledger = await readFile(join(repo, ".lockwire", "ledger.jsonl"), "utf8");
+    expect(ledger).toContain("marker retargeted src/session.ts#createSession -> src/session.ts#openSession");
+    const stable = await readFile(join(repo, "CLAUDE.md"), "utf8");
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    expect(await readFile(join(repo, "CLAUDE.md"), "utf8")).toBe(stable);
+  });
+
+  it("a marker whose symbol is gone and whose anchor didn't move is still skipped as not found", async () => {
+    const repo = await tempRepo();
+    await writeFile(join(repo, "CLAUDE.md"), doc(marker("src/session.ts#createSession", " sig id=GONE0001")), "utf8");
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    await writeFile(join(repo, "src", "session.ts"), "export const unrelated = 1;\n", "utf8");
+    await check(repo, DEFAULT_CONFIG);
+    const result = await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    expect(result.skipped[0]?.reason).toBe("target not found");
+  });
+
+  async function orphanedThenBack(newCode: string) {
+    const repo = await tempRepo();
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    await writeFile(join(repo, "src", "session.ts"), "export function other() {}\n", "utf8");
+    expect((await check(repo, DEFAULT_CONFIG)).results[0]?.status).toBe("orphaned");
+    await writeFile(join(repo, "src", "session.ts"), newCode, "utf8");
+    return repo;
+  }
+
+  it("an orphaned anchor whose symbol returns with a different signature needs --reviewed", async () => {
+    const repo = await orphanedThenBack(SESSION_TS.replace("ttl = 3600", "ttl: number, opts: Opts"));
+    const blocked = await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    expect(blocked.refreshed).toBe(0);
+    expect(blocked.skipped[0]?.reason).toMatch(/--reviewed/);
+    const ok = await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor, { reviewed: true });
+    expect(ok.refreshed).toBe(1);
+    expect((await check(repo, DEFAULT_CONFIG)).results[0]?.status).toBe("fresh");
+  });
+
+  it("...but one that returns unchanged re-links freely, so restoring a deleted marker or symbol is easy", async () => {
+    const repo = await orphanedThenBack(SESSION_TS);
+    const result = await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    expect(result.refreshed).toBe(1);
+    expect(result.skipped).toEqual([]);
+  });
+
+  const LONG = `${"`createSession` takes a `UserId` and returns a `Session` ".repeat(3)}done.`;
+  async function legacyLongClaim() {
+    const repo = await tempRepo();
+    const body = (s: string) => doc(marker("src/session.ts#createSession", " sig id=LONG0001"), s);
+    await writeFile(join(repo, "CLAUDE.md"), body(LONG), "utf8");
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    const lockPath = join(repo, "lockwire.lock");
+    const lock = JSON.parse(await readFile(lockPath, "utf8"));
+    delete lock.anchors[0].claim.normHash; // as stamped by an older version
+    await writeFile(lockPath, JSON.stringify(lock), "utf8");
+    return { repo, lockPath, body };
+  }
+
+  it("a legacy anchor gets its whitespace-insensitive hash backfilled by the first check that sees it unchanged", async () => {
+    const { repo, lockPath, body } = await legacyLongClaim();
+    expect((await check(repo, DEFAULT_CONFIG)).results[0]?.status).toBe("fresh");
+    expect(JSON.parse(await readFile(lockPath, "utf8")).anchors[0].claim.normHash).toMatch(/^b3:/);
+    await writeFile(join(repo, "CLAUDE.md"), body(LONG.replace(/ and /g, "\nand ")), "utf8");
+    expect((await check(repo, DEFAULT_CONFIG)).results[0]?.status).toBe("fresh"); // a re-wrap is now harmless
+    await writeFile(join(repo, "CLAUDE.md"), body(LONG.replace("returns", "yields")), "utf8");
+    expect((await check(repo, DEFAULT_CONFIG)).results[0]?.claimChanged).toBe(true); // a real edit still flags
+  });
+
+  it("backfill never happens on a dry run, and never launders a claim that already changed", async () => {
+    const { repo, lockPath, body } = await legacyLongClaim();
+    const before = await readFile(lockPath, "utf8");
+    await check(repo, DEFAULT_CONFIG, undefined, { write: false });
+    expect(await readFile(lockPath, "utf8")).toBe(before);
+
+    await writeFile(join(repo, "CLAUDE.md"), body("A totally different sentence."), "utf8");
+    expect((await check(repo, DEFAULT_CONFIG)).results[0]?.claimChanged).toBe(true);
+    expect(JSON.parse(await readFile(lockPath, "utf8")).anchors[0].claim.normHash).toBeUndefined();
+  });
+});

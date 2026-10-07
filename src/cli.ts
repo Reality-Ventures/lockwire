@@ -149,6 +149,18 @@ async function main() {
             ? formatGithub(result)
             : formatText(result);
       console.log(out);
+      if (fmt === "text" && !flags["no-write"] && result.summary.relocated > 0) {
+        const docs = [
+          ...new Set(
+            result.results
+              .filter((r) => r.anchor.doc && r.anchor.target.symbol)
+              .map((r) => r.anchor.doc as string),
+          ),
+        ];
+        console.log(
+          `note: ${result.summary.relocated} anchor${result.summary.relocated === 1 ? "" : "s"} relocated to a renamed symbol; the doc marker still names the old one. Run \`lockwire link ${docs.length === 1 ? docs[0] : "<doc>"}\` to update it.`,
+        );
+      }
       process.exitCode = result.summary.drifted > 0 || result.summary.orphaned > 0 ? 1 : 0;
       break;
     }

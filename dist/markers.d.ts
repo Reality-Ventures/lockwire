@@ -23,4 +23,9 @@ export declare const EXCERPT_MAX = 90;
 export declare function claimUnchanged(stored: AnchorClaim, current: DocMarker): boolean;
 /** Rewrites a marker line to carry its stamped id, preserving any tier spec already present and whatever precedes the marker (indentation, a BOM). */
 export declare function stampMarkerLine(line: string, id: string): string;
+/** Rewrites a marker line's target (`path#Symbol`), keeping its tiers, id and whatever precedes it. */
+export declare function retargetMarkerLine(line: string, target: {
+    path: string;
+    symbol?: string;
+}): string;
 //# sourceMappingURL=markers.d.ts.map

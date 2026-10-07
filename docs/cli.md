@@ -1,6 +1,6 @@
 # CLI reference
 
-Every command resolves the repo root by walking up from the current directory looking for `lockwire.lock`, then `.git`, falling back to the current directory.
+Every command resolves the repo root by walking up from the current directory to the **nearest** folder that contains a `lockwire.lock` or a `.git`, falling back to the current directory. Nearest wins on purpose: a stray `lockwire.lock` in some parent folder (an old experiment, a workspace root) must not capture a new project that has its own `.git` beneath it, and a vendored or nested repository keeps its own root.
 
 ## `lockwire init`
 
@@ -17,6 +17,8 @@ Scans `<doc.md>` for `<!-- lockwire <target> [tiers] [id=<id>] -->` markers, res
 - A marker with no `id=` is a **new** claim: an anchor is created, and the marker line in the doc is rewritten in place to add `id=<new-id>`.
 - A marker with an `id=` **refreshes** an existing anchor's fingerprints to the current code state.
 - Refreshing an anchor that is currently `drifted` requires `--reviewed` — this is the relink gate, so a stale claim can't be silently re-stamped by an automated pass without a human or agent explicitly saying "I looked at this."
+  The gate applies to an anchor that is `drifted`, or `orphaned` and whose symbol has come back changed. It doesn't apply when the code still matches and only the claim sentence moved, so editing a sentence or restoring a deleted marker over unchanged code re-links freely.
+- If `check` relocated the anchor to a renamed symbol, the marker still names the old one. `link` follows the anchor, rewrites the marker to the new name (keeping its tiers and id), and records the retarget in the ledger. `check` prints a note when this is pending.
 
 ```bash
 lockwire link CLAUDE.md

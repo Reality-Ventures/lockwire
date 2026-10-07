@@ -43,7 +43,7 @@ export function toRepoPath(repoRoot: string, input: string, cwd: string = proces
   return toRepoRelative(repoRoot, resolve(cwd, input));
 }
 
-/** Walk up from `startDir` looking for `lockwire.lock` or a `.git` entry; undefined if neither exists above it. */
+/** Walk up from `startDir` to the nearest folder holding `lockwire.lock` or `.git` (nearest wins, so a stray lockfile in a parent can't capture a nested project); undefined if there is none. */
 export function tryFindRepoRoot(startDir: string): string | undefined {
   let dir = resolve(startDir);
   while (true) {
@@ -54,7 +54,7 @@ export function tryFindRepoRoot(startDir: string): string | undefined {
   }
 }
 
-/** Walk up from `startDir` looking for `lockwire.lock`, falling back to a `.git` directory, falling back to `startDir`. */
+/** The nearest `lockwire.lock`/`.git` ancestor of `startDir`, or `startDir` itself. */
 export function findRepoRoot(startDir: string): string {
   return tryFindRepoRoot(startDir) ?? resolve(startDir);
 }

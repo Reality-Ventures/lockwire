@@ -228,3 +228,31 @@ describe.skipIf(!existsSync(CLI))("lockwire check --changed / --staged / --no-wr
     expect(run.status).toBe(1);
   });
 });
+
+describe.skipIf(!existsSync(CLI))("the relocation hint", () => {
+  async function renamed() {
+    const dir = await repo();
+    await edit(dir, "src/a.ts", "alpha", "alphaRenamed");
+    return dir;
+  }
+
+  it("`check` tells you the marker is stale after persisting a relocation, and `link` clears it", async () => {
+    const dir = await renamed();
+    const out = cli(dir, ["check"]).stdout;
+    expect(out).toContain("1 relocated");
+    expect(out).toMatch(/note: 1 anchor relocated .*lockwire link CLAUDE\.md/);
+    const linked = cli(dir, ["link", "CLAUDE.md"]).stdout;
+    expect(linked).toContain("2 refreshed");
+    expect(linked).not.toContain("skipped");
+    expect(await readFile(join(dir, "CLAUDE.md"), "utf8")).toContain("src/a.ts#alphaRenamed");
+    expect(cli(dir, ["check"]).stdout).not.toContain("note:");
+  });
+
+  it("stays quiet on a dry run or JSON output, where nothing was persisted or it's machine-read", async () => {
+    const dry = cli(await renamed(), ["check", "--no-write"]).stdout;
+    expect(dry).toContain("1 relocated");
+    expect(dry).not.toContain("note:");
+    const json = cli(await renamed(), ["check", "--format", "json"]).stdout;
+    expect(() => JSON.parse(json)).not.toThrow();
+  });
+});

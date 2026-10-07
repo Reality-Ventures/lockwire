@@ -14,7 +14,13 @@ import {
   upsertAnchor,
   writeLockfile,
 } from "./lockfile.js";
-import { claimUnchanged, type DocMarker, scanMarkers, stampMarkerLine } from "./markers.js";
+import {
+  claimUnchanged,
+  type DocMarker,
+  retargetMarkerLine,
+  scanMarkers,
+  stampMarkerLine,
+} from "./markers.js";
 import { globToRegExp, matchesAny, toRepoRelative, walkFiles } from "./repo.js";
 import type { Actor, Anchor, FileSymbols, Fingerprints, LockwireConfig, Tier } from "./types.js";
 import { ALL_TIERS } from "./types.js";
@@ -164,17 +170,41 @@ export async function linkDoc(
       });
       continue;
     }
+
+    // The marker names a symbol that's gone, but its anchor was relocated to a renamed one (`check`
+    // does that, and only updates the lockfile). Follow the anchor and fix the marker to match.
+    let target = marker.target;
+    let retargeted = false;
+    if ((!resolved || !resolved.found) && existing) {
+      const moved = existing.target;
+      if (moved.path !== marker.target.path || moved.symbol !== marker.target.symbol) {
+        try {
+          const viaAnchor = await resolveTarget(repoRoot, moved, config);
+          if (viaAnchor?.found) {
+            resolved = viaAnchor;
+            target = moved;
+            retargeted = true;
+          }
+        } catch {
+          // fall through to "target not found"
+        }
+      }
+    }
     if (!resolved || !resolved.found) {
       result.skipped.push({ reason: "target not found", target: targetLabel });
       continue;
     }
 
-    // Re-stamping a drifted anchor accepts the new code, so it needs a human's say-so -- unless the
-    // drift is only the claim sentence having been edited and the code still matches.
+    // Re-stamping a drifted (or orphaned-then-reappeared) anchor accepts code nobody has looked at, so
+    // it needs a human's say-so -- unless the code still matches and only the claim sentence moved.
     const codeDrifted =
       existing !== undefined &&
       existing.tiers.some((t) => resolved.fingerprints[t] !== existing.fingerprints[t]);
-    if (existing?.status === "drifted" && codeDrifted && !opts.reviewed) {
+    if (
+      (existing?.status === "drifted" || existing?.status === "orphaned") &&
+      codeDrifted &&
+      !opts.reviewed
+    ) {
       result.skipped.push({
         reason: "drifted anchor needs --reviewed to re-stamp",
         target: marker.target.path,
@@ -183,7 +213,7 @@ export async function linkDoc(
     }
 
     const tiers =
-      marker.tiers ?? (marker.target.symbol ? (["sig"] as Tier[]) : (["path", "body"] as Tier[]));
+      marker.tiers ?? (target.symbol ? (["sig"] as Tier[]) : (["path", "body"] as Tier[]));
     const isNew = !marker.id || copiedId;
     const id = isNew || !marker.id ? newAnchorId() : marker.id;
     idsSeenInDoc.add(id);
@@ -197,7 +227,7 @@ export async function linkDoc(
         normHash: marker.claimNormHash,
         excerpt: marker.claimExcerpt,
       },
-      target: marker.target,
+      target,
       tiers,
       fingerprints: resolved.fingerprints,
       linked: { at: new Date().toISOString(), commit, by: actor },
@@ -223,13 +253,23 @@ export async function linkDoc(
       });
     } else {
       result.refreshed++;
+      if (retargeted) {
+        const partIdx = (marker.line - 1) * 2;
+        const original = parts[partIdx];
+        if (original !== undefined) {
+          parts[partIdx] = retargetMarkerLine(original, target);
+          docChanged = true;
+        }
+      }
       await appendEvent(repoRoot, {
         ts: anchor.linked.at,
         event: "anchor.resolved",
         anchor: id,
         actor,
         commit,
-        note: "re-stamped via link",
+        note: retargeted
+          ? `re-stamped via link; marker retargeted ${targetLabel} -> ${target.path}${target.symbol ? `#${target.symbol}` : ""}`
+          : "re-stamped via link",
       });
     }
   }
@@ -403,6 +443,13 @@ export async function check(
         continue;
       }
       claimChanged = !claimUnchanged(anchor.claim, marker);
+      // A claim stamped before `normHash` existed can only be compared by raw text. Now that we've
+      // just confirmed it's unchanged, record the whitespace-insensitive hash so a later re-wrap
+      // (a formatter pass) can't flag it.
+      if (!claimChanged && !anchor.claim.normHash) {
+        anchor = { ...anchor, claim: { ...anchor.claim, normHash: marker.claimNormHash } };
+        current = upsertAnchor(current, anchor);
+      }
     }
 
     let resolved: TargetResolution | null;
