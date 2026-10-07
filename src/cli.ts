@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import type { LinkResult } from "./actions.js";
 import {
   ack,
   check,
@@ -21,6 +22,7 @@ import { runClaudeHook } from "./hook-claude.js";
 import { runCodexHook } from "./hook-codex.js";
 import { readLedger, verifyLedger } from "./ledger.js";
 import { readLockfile, writeLockfile } from "./lockfile.js";
+import { scanMarkers } from "./markers.js";
 import { findRepoRoot, isPathGitignored, toRepoPath } from "./repo.js";
 import type { Tier } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
@@ -51,6 +53,13 @@ function parseFlags(args: string[]): {
     }
   }
   return { positional, flags };
+}
+
+function printLinkResult(doc: string, result: LinkResult) {
+  console.log(
+    `${doc}: ${result.created} created, ${result.refreshed} refreshed${result.skipped.length ? `, ${result.skipped.length} skipped` : ""}`,
+  );
+  for (const s of result.skipped) console.log(`  skipped ${s.target}: ${s.reason}`);
 }
 
 async function main() {
@@ -89,7 +98,30 @@ async function main() {
     case "link": {
       const config = await readConfig(repoRoot);
       const [docArg, target] = positional;
-      if (!docArg) throw new Error("usage: lockwire link <doc.md> [target] [--tiers a,b]");
+      if (!docArg) {
+        // No doc named: link every doc the config selects (`docs` / `exclude`) that has markers.
+        const totals = { docs: 0, created: 0, refreshed: 0, skipped: 0 };
+        for (const doc of await discoverDocs(repoRoot, config)) {
+          if (scanMarkers(await readFile(`${repoRoot}/${doc}`, "utf8")).length === 0) continue;
+          const result = await linkDoc(repoRoot, doc, config, actor, {
+            reviewed: Boolean(flags.reviewed),
+          });
+          printLinkResult(doc, result);
+          totals.docs++;
+          totals.created += result.created;
+          totals.refreshed += result.refreshed;
+          totals.skipped += result.skipped.length;
+        }
+        if (totals.docs === 0)
+          console.log(
+            `no docs with lockwire markers found (docs: ${config.docs.join(", ")}; exclude: ${config.exclude.join(", ")})`,
+          );
+        else if (totals.docs > 1)
+          console.log(
+            `${totals.docs} docs: ${totals.created} created, ${totals.refreshed} refreshed${totals.skipped ? `, ${totals.skipped} skipped` : ""}`,
+          );
+        break;
+      }
       const doc = toRepoPath(repoRoot, docArg);
       if (doc.startsWith(".."))
         throw new Error(`${docArg} is outside the repository (${repoRoot})`);
@@ -116,10 +148,7 @@ async function main() {
         const result = await linkDoc(repoRoot, doc, config, actor, {
           reviewed: Boolean(flags.reviewed),
         });
-        console.log(
-          `${doc}: ${result.created} created, ${result.refreshed} refreshed${result.skipped.length ? `, ${result.skipped.length} skipped` : ""}`,
-        );
-        for (const s of result.skipped) console.log(`  skipped ${s.target}: ${s.reason}`);
+        printLinkResult(doc, result);
       }
       break;
     }

@@ -92,8 +92,6 @@ export interface ResolvedSymbol {
 export interface FileSymbols {
     /** dotted-path name -> symbol, e.g. "createSession" or "AuthConfig.refresh" */
     bySymbolPath: Map<string, ResolvedSymbol>;
-    /** sig-fingerprint of a symbol -> symbol paths that share it, used for relocation matching */
-    sigIndex: Map<string, string[]>;
     fileExports: string[];
 }
 //# sourceMappingURL=types.d.ts.map

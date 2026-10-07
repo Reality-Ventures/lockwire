@@ -288,7 +288,6 @@ export function extractFileSymbols(root, lang, normalizeLocals) {
     const decl = DECLARATION_TYPES[lang];
     const importedNames = collectImportedNames(root, lang);
     const bySymbolPath = new Map();
-    const sigIndex = new Map();
     const fileExports = [];
     function unwrapDecorated(node) {
         return node.type === "decorated_definition"
@@ -319,9 +318,6 @@ export function extractFileSymbols(root, lang, normalizeLocals) {
         bySymbolPath.set(symbolPath, symbol);
         if (exported)
             fileExports.push(symbolPath);
-        const list = sigIndex.get(sigTokens) ?? [];
-        list.push(symbolPath);
-        sigIndex.set(sigTokens, list);
     }
     // Symbols are module-level functions and classes, and the members of those classes. Anything
     // declared inside a function (a helper, a local class) is not addressable and must not shadow a
@@ -381,7 +377,7 @@ export function extractFileSymbols(root, lang, normalizeLocals) {
         if (!isLocal(clsNode))
             visitClass(clsNode, null);
     }
-    return { bySymbolPath, sigIndex, fileExports };
+    return { bySymbolPath, fileExports };
 }
 export function fileExportsFingerprint(symbols) {
     return fingerprintSet(symbols.fileExports.map((path) => `${path}:${symbols.bySymbolPath.get(path)?.sigTokens ?? ""}`));

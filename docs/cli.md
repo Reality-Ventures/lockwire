@@ -25,6 +25,15 @@ lockwire link CLAUDE.md
 lockwire link CLAUDE.md --reviewed
 ```
 
+### `lockwire link [--reviewed]` (no doc)
+
+Links every doc the config selects — [`docs` and `exclude`](#configuration-lockwireconfigjson) — that contains at least one marker, and prints one line per doc plus a total. Docs without markers are never read for writing, so they are left byte-for-byte alone, and a marker inside a fenced code block is an example, not a binding. Naming a doc explicitly ignores `docs`/`exclude`.
+
+```bash
+lockwire link
+lockwire link --reviewed
+```
+
 ### `lockwire link <doc.md> <target> [--tiers a,b]`
 
 Creates a **lockfile-only** anchor: a whole-doc-to-code binding with no inline marker, for the case where you want a doc bound to a file without annotating a specific paragraph. `target` is `path` or `path#Symbol`. Defaults: `sig` for a symbol target, `path,body` for a file target.
@@ -84,6 +93,18 @@ single-hash would flag 3 · lockwire flagged 1 · noise −66.7%
   ]
 }
 ```
+
+## Configuration: `.lockwire/config.json`
+
+`lockwire init` writes the defaults. Every key does something; a key that isn't listed here isn't read.
+
+| Key | Default | Effect |
+|---|---|---|
+| `docs` | `["**/*.md"]` | Globs of the docs that `lockwire link` (with no argument) scans for markers. |
+| `exclude` | `["node_modules/**", "dist/**", "**/CHANGELOG.md"]` | Globs that scan skips. `.git`, `node_modules` and `.lockwire` are always skipped. |
+| `normalizeLocals` | `true` | Alias local variables in the `body` fingerprint, so renaming a local isn't drift. Changing it changes every `body` fingerprint, so re-link afterwards. |
+| `hook.mode` | `"advisory"` | What the `PreToolUse` hook does: `advisory`, `ask` or `deny` — see [agents.md](agents.md#hook-modes). |
+| `hook.maxClaimsInContext` | `8` | The most claims the hooks inject for one edit; the rest are summarised as "…and N more". |
 
 ## `lockwire status [--scope <glob>] [--json]`
 

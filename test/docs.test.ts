@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_CONFIG } from "../src/types.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = join(ROOT, "dist", "cli.js");
@@ -292,5 +293,27 @@ describe("links in the documentation resolve", () => {
         broken.push(`${rel}:${line} -> ${target} (no heading "${frag}")`);
     }
     expect(broken).toEqual([]);
+  });
+});
+
+describe("the documented configuration is the real configuration", () => {
+  /** Dotted leaf keys of a config object, e.g. `hook.mode`. */
+  const leaves = (o: Record<string, unknown>, prefix = ""): string[] =>
+    Object.entries(o).flatMap(([k, v]) =>
+      v && typeof v === "object" && !Array.isArray(v)
+        ? leaves(v as Record<string, unknown>, `${prefix}${k}.`)
+        : [`${prefix}${k}`],
+    );
+
+  it("docs/cli.md's configuration table lists exactly the keys `init` writes, bar the schema version", () => {
+    const cli = read("docs/cli.md");
+    const start = cli.indexOf("## Configuration");
+    expect(start, "docs/cli.md lost its Configuration section").toBeGreaterThan(-1);
+    const section = cli.slice(start, cli.indexOf("\n## ", start + 5));
+    const documented = [...section.matchAll(/^\|\s*`([\w.]+)`\s*\|/gm)].map((m) => m[1]).sort();
+    const real = leaves(DEFAULT_CONFIG as unknown as Record<string, unknown>)
+      .filter((k) => k !== "version")
+      .sort();
+    expect(documented).toEqual(real);
   });
 });

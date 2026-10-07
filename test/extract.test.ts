@@ -232,9 +232,6 @@ class C:
     );
     expect([...s.bySymbolPath.keys()].sort()).toEqual(["C", "C.p", "C.s", "view"]);
     expect(s.bySymbolPath.get("view")?.sigTokens).toBe("fn view(a,b=) [@app.route('/x')]");
-    // sigIndex must not list the same symbol under two different sig strings.
-    const listed = [...s.sigIndex.values()].flat().filter((p) => p === "view");
-    expect(listed).toHaveLength(1);
   });
 
   it("Python has no `export`, so decorating a function doesn't make it one", async () => {

@@ -307,7 +307,6 @@ export function extractFileSymbols(
   const decl = DECLARATION_TYPES[lang];
   const importedNames = collectImportedNames(root, lang);
   const bySymbolPath = new Map<string, ResolvedSymbol>();
-  const sigIndex = new Map<string, string[]>();
   const fileExports: string[] = [];
 
   function unwrapDecorated(node: Node): Node {
@@ -344,9 +343,6 @@ export function extractFileSymbols(
     };
     bySymbolPath.set(symbolPath, symbol);
     if (exported) fileExports.push(symbolPath);
-    const list = sigIndex.get(sigTokens) ?? [];
-    list.push(symbolPath);
-    sigIndex.set(sigTokens, list);
   }
 
   // Symbols are module-level functions and classes, and the members of those classes. Anything
@@ -406,7 +402,7 @@ export function extractFileSymbols(
     if (!isLocal(clsNode)) visitClass(clsNode, null);
   }
 
-  return { bySymbolPath, sigIndex, fileExports };
+  return { bySymbolPath, fileExports };
 }
 
 export function fileExportsFingerprint(symbols: FileSymbols): string {

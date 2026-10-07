@@ -6,6 +6,9 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added
 
+- `lockwire link` with no document links every doc the config selects (`docs` / `exclude`) that contains markers, and prints a line per doc plus a total; `--reviewed` passes through. Docs without markers are left byte-for-byte alone, and markers inside fenced code blocks are examples, not bindings. Naming a doc still ignores the config. `docs` and `exclude` were read by the config loader and written to every `config.json` but nothing in the CLI used them (`discoverDocs` was imported and never called); now they do something.
+- `docs/cli.md` documents every config key and a test keeps that table identical to the keys `init` writes, plus a test that fails if a config key exists that nothing in `src/` reads.
+
 - Tiered fingerprinting (`path`, `sig`, `body`, `deps`) for TypeScript, TSX, JavaScript, and Python symbols, via tree-sitter and truncated BLAKE3.
 - `lockwire.lock` anchor store, with inline markdown markers (`<!-- lockwire <target> [tiers] [id] -->`) and lockfile-only bindings.
 - `.lockwire/ledger.jsonl` — an append-only, order-independent, tamper-evident event log with `git notes`-style union-merge semantics and [Agent Trace](https://agent-trace.dev/)-shaped actors.
@@ -23,6 +26,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Changed
 
+- Removed the `sigIndex` field from `FileSymbols`: it was built on every extraction and read by nothing (relocation matches by symbol path). Library consumers of `extractFileSymbols` that read it should use `bySymbolPath`.
 - **Symbol extraction now follows scope.** Anchors can bind to module-level functions and classes, class members, and classes nested directly in a class body (`Outer.Inner`, `Outer.Inner.method`). Anything declared inside a function is local and no longer registered. Before, a nested `function helper` overwrote a top-level `helper` in the symbol table (so an anchor on the real one silently tracked the inner one), and a class declared inside a method leaked `Outer.m`. Measured over 1,557 TS/JS/Python files (24,524 symbols: this repo, `node_modules`, the Python standard library): 94.9% of symbols keep identical fingerprints; 1,226 (5%) were local symbols and are no longer extracted, so an anchor on one now reports `orphaned`; 20 nested classes/methods gained correct dotted paths. I checked the removals against a column-0 heuristic and found no legitimate top-level symbol lost.
 - **Paren-less single-parameter arrows** (`x => x + 1`) now include the parameter in `sig` and alias it as a local in `body`. Anchors on such a function (22 of 24,524 in the corpus) drift once on `sig` and `body`; re-link them.
 - A decorated Python function is extracted once and is no longer counted as an "export" (Python has none). A whole-file `sig` binding on a `.py` file with decorated top-level functions changes once; the default whole-file binding (`path`,`body`) is unaffected.
