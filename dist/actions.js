@@ -79,7 +79,9 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
     const markers = scanMarkers(text);
     const lockfile = await readLockfile(repoRoot);
     const result = { created: 0, refreshed: 0, skipped: [] };
-    const lines = text.split(/\r?\n/);
+    // Keep each line's own terminator: stamping a marker must change that one line, not rewrite every
+    // CRLF in the file to LF. `parts` alternates line, terminator, line, terminator, ...
+    const parts = text.split(/(\r?\n)/);
     let docChanged = false;
     let current = lockfile;
     for (const marker of markers) {
@@ -146,10 +148,10 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
         };
         current = upsertAnchor(current, anchor);
         if (isNew) {
-            const lineIdx = marker.line - 1;
-            const original = lines[lineIdx];
+            const partIdx = (marker.line - 1) * 2;
+            const original = parts[partIdx];
             if (original !== undefined) {
-                lines[lineIdx] = stampMarkerLine(original, id);
+                parts[partIdx] = stampMarkerLine(original, id);
                 docChanged = true;
             }
             result.created++;
@@ -175,7 +177,7 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
     }
     await writeLockfile(repoRoot, current);
     if (docChanged)
-        await writeFile(absDoc, lines.join("\n"), "utf8");
+        await writeFile(absDoc, parts.join(""), "utf8");
     return result;
 }
 /** `lockwire link <doc> <target>` — a lockfile-only anchor with no inline marker, for whole-doc-to-file bindings. */

@@ -134,11 +134,12 @@ export function claimUnchanged(stored: AnchorClaim, current: DocMarker): boolean
   return !stored.excerpt.endsWith("…") && current.claimExcerpt === stored.excerpt;
 }
 
-/** Rewrites a marker line to carry its stamped id, preserving any tier spec already present. */
+/** Rewrites a marker line to carry its stamped id, preserving any tier spec already present and whatever precedes the marker (indentation, a BOM). */
 export function stampMarkerLine(line: string, id: string): string {
   const m = MARKER_RE.exec(line.trim());
   if (!m) return line;
+  const prefix = /^\s*/.exec(line)?.[0] ?? "";
   const tokens = (m[1] ?? "").split(/\s+/).filter((t) => !t.startsWith("id="));
   tokens.push(`id=${id}`);
-  return `<!-- lockwire ${tokens.join(" ")} -->`;
+  return `${prefix}<!-- lockwire ${tokens.join(" ")} -->`;
 }

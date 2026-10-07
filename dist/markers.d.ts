@@ -20,6 +20,6 @@ export declare function scanMarkers(text: string): DocMarker[];
  * raw hash, then to the stored excerpt when it holds the whole claim (it isn't truncated).
  */
 export declare function claimUnchanged(stored: AnchorClaim, current: DocMarker): boolean;
-/** Rewrites a marker line to carry its stamped id, preserving any tier spec already present. */
+/** Rewrites a marker line to carry its stamped id, preserving any tier spec already present and whatever precedes the marker (indentation, a BOM). */
 export declare function stampMarkerLine(line: string, id: string): string;
 //# sourceMappingURL=markers.d.ts.map

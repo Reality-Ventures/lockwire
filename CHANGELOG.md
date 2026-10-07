@@ -18,6 +18,8 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Fixed
 
+- Stamping a marker (`lockwire link`) rewrote every CRLF in the doc to LF, producing a whole-file diff on Windows. Each line's own terminator is now preserved, and stamping changes only the marker line. Stamping also keeps whatever precedes the marker on its line, such as list-item indentation or a leading BOM.
+- A UTF-8 BOM at the start of `lockwire.lock`, `.lockwire/config.json` or `.lockwire/ledger.jsonl` (Windows editors and PowerShell add one) made it unreadable. All three are now read with the BOM stripped.
 - Path arguments weren't normalized: `lockwire link ./CLAUDE.md` stored the doc as `./CLAUDE.md` (never matching hooks or MCP lookups), `link guide.md` from `docs/` failed, and `check ./src/x.ts` scoped nothing and exited 0 on drift. CLI paths now resolve against the cwd and are stored repo-relative; `link` rejects a doc outside the repo. The MCP tools accept absolute and `./` paths the same way.
 - Markers inside fenced code blocks (``` or ~~~, including indented ones) were treated as live bindings, so documentation examples got stamped. They are now ignored. An anchor whose marker sits inside a fence is reported as orphaned (marker removed).
 - `lockwire ack --resolution` accepted any value; it now rejects anything but `updated`, `superseded` or `false-positive`.

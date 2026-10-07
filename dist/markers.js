@@ -115,13 +115,14 @@ export function claimUnchanged(stored, current) {
         return true;
     return !stored.excerpt.endsWith("…") && current.claimExcerpt === stored.excerpt;
 }
-/** Rewrites a marker line to carry its stamped id, preserving any tier spec already present. */
+/** Rewrites a marker line to carry its stamped id, preserving any tier spec already present and whatever precedes the marker (indentation, a BOM). */
 export function stampMarkerLine(line, id) {
     const m = MARKER_RE.exec(line.trim());
     if (!m)
         return line;
+    const prefix = /^\s*/.exec(line)?.[0] ?? "";
     const tokens = (m[1] ?? "").split(/\s+/).filter((t) => !t.startsWith("id="));
     tokens.push(`id=${id}`);
-    return `<!-- lockwire ${tokens.join(" ")} -->`;
+    return `${prefix}<!-- lockwire ${tokens.join(" ")} -->`;
 }
 //# sourceMappingURL=markers.js.map

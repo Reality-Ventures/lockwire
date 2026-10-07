@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { canonicalJson, fingerprint, fingerprintSet } from "./hash.js";
+import { stripBom } from "./repo.js";
 import type { LedgerRecord } from "./types.js";
 
 export function ledgerPath(repoRoot: string): string {
@@ -32,7 +33,7 @@ export async function appendEvent(
 export async function readLedger(repoRoot: string): Promise<LedgerRecord[]> {
   const path = ledgerPath(repoRoot);
   if (!existsSync(path)) return [];
-  const raw = await readFile(path, "utf8");
+  const raw = stripBom(await readFile(path, "utf8"));
   const records: LedgerRecord[] = [];
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
@@ -55,7 +56,7 @@ export interface VerifyResult {
 export async function verifyLedger(repoRoot: string): Promise<VerifyResult> {
   const path = ledgerPath(repoRoot);
   if (!existsSync(path)) return { ok: true, total: 0, badLines: [], root: fingerprintSet([]) };
-  const raw = await readFile(path, "utf8");
+  const raw = stripBom(await readFile(path, "utf8"));
   const lines = raw.split("\n").filter((l) => l.trim() !== "");
   const badLines: number[] = [];
   const hashes: string[] = [];

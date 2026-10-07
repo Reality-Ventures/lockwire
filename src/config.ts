@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { stripBom } from "./repo.js";
 import type { LockwireConfig } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
 
@@ -11,7 +12,7 @@ export function configPath(repoRoot: string): string {
 export async function readConfig(repoRoot: string): Promise<LockwireConfig> {
   const path = configPath(repoRoot);
   if (!existsSync(path)) return DEFAULT_CONFIG;
-  const raw = JSON.parse(await readFile(path, "utf8"));
+  const raw = JSON.parse(stripBom(await readFile(path, "utf8")));
   return {
     version: 1,
     docs: raw.docs ?? DEFAULT_CONFIG.docs,

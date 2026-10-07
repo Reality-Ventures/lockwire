@@ -20,6 +20,11 @@ export function walkFiles(repoRoot: string, exclude: readonly string[] = []): st
   return out;
 }
 
+/** Windows editors (and PowerShell's `Out-File`) prepend a UTF-8 BOM that `JSON.parse` rejects. */
+export function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
 /** Windows delivers hook paths with backslashes even under Git Bash. Normalize before any comparison. */
 export function toPosix(p: string): string {
   return p.replace(/\\/g, "/");
