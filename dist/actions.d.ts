@@ -1,4 +1,4 @@
-import { type IndexStats } from "./docindex.js";
+import { type IndexState, type IndexStats } from "./docindex.js";
 import { type DocMarker } from "./markers.js";
 import type { Actor, Anchor, FileSymbols, Fingerprints, Lockfile, LockwireConfig, Tier } from "./types.js";
 export interface TargetResolution {
@@ -89,11 +89,18 @@ export type MarkerView = Pick<DocMarker, "id" | "target" | "line" | "claimExcerp
  */
 export declare function findUnlinkedMarkers(lockfile: Lockfile, docs: readonly string[], readMarkers: (doc: string) => Promise<readonly MarkerView[] | null>): Promise<UnlinkedMarker[]>;
 /**
- * Claims written in the docs about this file (or symbol) that no anchor backs. Read-only: it uses an
- * existing doc index if there is one but never writes it (the MCP tool built on this is annotated
- * read-only).
+ * A holder a long-lived caller keeps between calls so the doc index lives in memory and each call
+ * only re-validates it.
  */
-export declare function unlinkedFor(repoRoot: string, config: LockwireConfig, path: string, symbol?: string): Promise<UnlinkedMarker[]>;
+export interface IndexSession {
+    state?: IndexState;
+}
+/**
+ * Claims written in the docs about this file (or symbol) that no anchor backs. Read-only: it never
+ * writes the on-disk doc index (the MCP tool built on this is annotated read-only). It will read one
+ * that exists, and with a `session` it keeps the index in memory across calls.
+ */
+export declare function unlinkedFor(repoRoot: string, config: LockwireConfig, path: string, symbol?: string, session?: IndexSession, onStats?: (stats: IndexStats) => void): Promise<UnlinkedMarker[]>;
 /**
  * {@link unlinkedFor} for callers on a latency budget (the PreToolUse hook), backed by the doc index
  * (see docindex.ts) so it doesn't walk the tree or read every doc each time. `complete` is false when
@@ -101,10 +108,12 @@ export declare function unlinkedFor(repoRoot: string, config: LockwireConfig, pa
  */
 export declare function unlinkedForWithin(repoRoot: string, config: LockwireConfig, path: string, symbol: string | undefined, budgetMs: number, opts?: {
     persist?: boolean;
+    prior?: IndexState;
 }): Promise<{
     claims: UnlinkedMarker[];
     complete: boolean;
     index: IndexStats;
+    state: IndexState;
 }>;
 export declare function check(repoRoot: string, config: LockwireConfig, onlyPaths?: readonly string[], opts?: {
     write?: boolean;

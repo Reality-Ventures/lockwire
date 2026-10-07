@@ -110,7 +110,7 @@ export async function loadDocIndex(repoRoot, config, opts = {}) {
     const configKey = configKeyOf(config);
     const abs = (rel) => (rel === "" ? repoRoot : join(repoRoot, rel));
     const over = () => now() > deadline;
-    let data = opts.rebuild ? null : await readIndexFile(repoRoot);
+    let data = opts.rebuild ? null : (opts.prior ?? (await readIndexFile(repoRoot)));
     if (data && (data.configKey !== configKey || now() - data.builtAt > MAX_AGE_MS))
         data = null;
     let complete = true;
@@ -293,17 +293,20 @@ export async function loadDocIndex(repoRoot, config, opts = {}) {
         }
     }
     const index = data;
-    if (complete && opts.persist !== false) {
-        // Rewrite when something changed, or when racy entries have aged enough to be trusted.
+    if (complete) {
+        // Refresh when something changed, or when racy entries have aged enough to be trusted. Even a
+        // caller that doesn't persist keeps the new `builtAt`, so its in-memory state settles too.
         const settled = sawRacy && now() - index.builtAt > RACY_MS;
         if (changed || settled || stats.rebuilt) {
             index.builtAt = now();
-            stats.wrote = await writeIndexFile(repoRoot, index);
+            if (opts.persist !== false)
+                stats.wrote = await writeIndexFile(repoRoot, index);
         }
     }
     return {
         docs: Object.keys(index.docs).sort(),
         markersOf: (doc) => index.docs[doc]?.markers,
+        state: index,
         complete,
         stats,
     };

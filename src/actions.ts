@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { headCommit } from "./changed.js";
-import { type IndexStats, loadDocIndex } from "./docindex.js";
+import { type IndexState, type IndexStats, loadDocIndex } from "./docindex.js";
 import { computeWholeFileTiers, extractFileSymbols, fileExportsFingerprint } from "./extract.js";
 import { langForPath, parserFor } from "./grammar.js";
 import { fingerprint, fingerprintSet } from "./hash.js";
@@ -428,21 +428,33 @@ const claimsAbout = (u: UnlinkedMarker, path: string, symbol?: string) =>
   symbol ? u.target === `${path}#${symbol}` : u.target === path || u.target.startsWith(`${path}#`);
 
 /**
- * Claims written in the docs about this file (or symbol) that no anchor backs. Read-only: it uses an
- * existing doc index if there is one but never writes it (the MCP tool built on this is annotated
- * read-only).
+ * A holder a long-lived caller keeps between calls so the doc index lives in memory and each call
+ * only re-validates it.
+ */
+export interface IndexSession {
+  state?: IndexState;
+}
+
+/**
+ * Claims written in the docs about this file (or symbol) that no anchor backs. Read-only: it never
+ * writes the on-disk doc index (the MCP tool built on this is annotated read-only). It will read one
+ * that exists, and with a `session` it keeps the index in memory across calls.
  */
 export async function unlinkedFor(
   repoRoot: string,
   config: LockwireConfig,
   path: string,
   symbol?: string,
+  session?: IndexSession,
+  onStats?: (stats: IndexStats) => void,
 ): Promise<UnlinkedMarker[]> {
-  return (
-    await unlinkedForWithin(repoRoot, config, path, symbol, Number.POSITIVE_INFINITY, {
-      persist: false,
-    })
-  ).claims;
+  const result = await unlinkedForWithin(repoRoot, config, path, symbol, Number.POSITIVE_INFINITY, {
+    persist: false,
+    ...(session?.state ? { prior: session.state } : {}),
+  });
+  if (session) session.state = result.state;
+  onStats?.(result.index);
+  return result.claims;
 }
 
 /**
@@ -456,8 +468,13 @@ export async function unlinkedForWithin(
   path: string,
   symbol: string | undefined,
   budgetMs: number,
-  opts: { persist?: boolean } = {},
-): Promise<{ claims: UnlinkedMarker[]; complete: boolean; index: IndexStats }> {
+  opts: { persist?: boolean; prior?: IndexState } = {},
+): Promise<{
+  claims: UnlinkedMarker[];
+  complete: boolean;
+  index: IndexStats;
+  state: IndexState;
+}> {
   const lockfile = await readLockfile(repoRoot);
   const index = await loadDocIndex(repoRoot, config, { budgetMs, ...opts });
   const direct = markerReader(repoRoot);
@@ -474,6 +491,7 @@ export async function unlinkedForWithin(
     claims: all.filter((u) => claimsAbout(u, path, symbol)),
     complete: index.complete,
     index: index.stats,
+    state: index.state,
   };
 }
 

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { ack, check, history, linkDoc, refs, status, unlinkedFor, waive } from "./actions.js";
+import { ack, check, history, linkDoc, refs, status, unlinkedFor, waive, } from "./actions.js";
 import { readConfig } from "./config.js";
 import { lockfilePath } from "./lockfile.js";
 import { toRepoPath } from "./repo.js";
@@ -23,8 +23,11 @@ function missingLockNote(repoRoot) {
     return `No lockwire.lock found in ${repoRoot}. This MCP server is rooted at the folder the session started in; start the session from the repository root (or run \`lockwire init\` there).`;
 }
 /** Builds the configured server without connecting a transport -- split out from startMcpServer so tests can drive it over an in-memory transport instead of real stdio. */
-export function createServer(repoRoot) {
+export function createServer(repoRoot, opts = {}) {
     const server = new McpServer({ name: "lockwire", version: "0.1.0" });
+    // The server outlives many calls, so it keeps the doc index in memory: the first `claims_for`
+    // builds (or loads) it, later ones only re-validate it. Nothing is written to disk.
+    const indexSession = {};
     // Every tool below only ever touches this repo's own working tree (lockfile, ledger, docs) --
     // no network calls, ever (see README FAQ "Does it call an LLM?") -- so openWorldHint is false
     // across the board. The other three hints vary per tool; see each one's own comment for why.
@@ -32,7 +35,8 @@ export function createServer(repoRoot) {
         title: "Claims for code",
         description: "What does the documentation assert about this file or symbol? Call before editing. Returns `anchors` (claims lockwire is checking) and `unlinked` (claims written in a doc about this code that nobody has linked yet, so nothing is checking them — treat them as real claims too).",
         inputSchema: { path: z.string(), symbol: z.string().optional() },
-        // Pure read (the lockfile and the docs; nothing is written) -- repeat calls are trivially idempotent.
+        // Pure read (the lockfile and the docs; the doc index is held in memory, never written to disk) --
+        // repeat calls are trivially idempotent.
         annotations: {
             readOnlyHint: true,
             destructiveHint: false,
@@ -46,7 +50,7 @@ export function createServer(repoRoot) {
         const repoPath = toRepoPath(repoRoot, path, repoRoot);
         return text({
             anchors: await refs(repoRoot, repoPath, symbol),
-            unlinked: await unlinkedFor(repoRoot, await readConfig(repoRoot), repoPath, symbol),
+            unlinked: await unlinkedFor(repoRoot, await readConfig(repoRoot), repoPath, symbol, indexSession, opts.onIndexStats),
         });
     });
     server.registerTool("lockwire_refs", {

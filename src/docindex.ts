@@ -58,6 +58,9 @@ interface IndexData {
   docs: Record<string, DocEntry>;
 }
 
+/** An index held by a long-lived caller (the MCP server) so repeat loads only re-validate. Treat as opaque. */
+export type IndexState = IndexData;
+
 export interface IndexStats {
   dirsStatted: number;
   dirsRescanned: number;
@@ -72,6 +75,8 @@ export interface DocIndex {
   /** Every doc the config selects, sorted. Only complete when `complete` is true. */
   docs: string[];
   markersOf(doc: string): IndexedMarker[] | undefined;
+  /** Pass back as `prior` next time to skip reading the file and re-validate in memory. */
+  state: IndexState;
   /** False when the time budget ran out: `docs`/`markersOf` are then only what was reached. */
   complete: boolean;
   stats: IndexStats;
@@ -84,6 +89,8 @@ export interface LoadOptions {
   persist?: boolean;
   /** Ignore any existing index. */
   rebuild?: boolean;
+  /** Start from an index this process already holds, instead of reading the file. */
+  prior?: IndexState;
   /** Clock, for tests. */
   now?: () => number;
 }
@@ -178,7 +185,7 @@ export async function loadDocIndex(
   const abs = (rel: string) => (rel === "" ? repoRoot : join(repoRoot, rel));
   const over = () => now() > deadline;
 
-  let data = opts.rebuild ? null : await readIndexFile(repoRoot);
+  let data = opts.rebuild ? null : (opts.prior ?? (await readIndexFile(repoRoot)));
   if (data && (data.configKey !== configKey || now() - data.builtAt > MAX_AGE_MS)) data = null;
 
   let complete = true;
@@ -346,18 +353,20 @@ export async function loadDocIndex(
   }
 
   const index = data;
-  if (complete && opts.persist !== false) {
-    // Rewrite when something changed, or when racy entries have aged enough to be trusted.
+  if (complete) {
+    // Refresh when something changed, or when racy entries have aged enough to be trusted. Even a
+    // caller that doesn't persist keeps the new `builtAt`, so its in-memory state settles too.
     const settled = sawRacy && now() - index.builtAt > RACY_MS;
     if (changed || settled || stats.rebuilt) {
       index.builtAt = now();
-      stats.wrote = await writeIndexFile(repoRoot, index);
+      if (opts.persist !== false) stats.wrote = await writeIndexFile(repoRoot, index);
     }
   }
 
   return {
     docs: Object.keys(index.docs).sort(),
     markersOf: (doc) => index.docs[doc]?.markers,
+    state: index,
     complete,
     stats,
   };

@@ -304,14 +304,19 @@ export async function findUnlinkedMarkers(lockfile, docs, readMarkers) {
 }
 const claimsAbout = (u, path, symbol) => symbol ? u.target === `${path}#${symbol}` : u.target === path || u.target.startsWith(`${path}#`);
 /**
- * Claims written in the docs about this file (or symbol) that no anchor backs. Read-only: it uses an
- * existing doc index if there is one but never writes it (the MCP tool built on this is annotated
- * read-only).
+ * Claims written in the docs about this file (or symbol) that no anchor backs. Read-only: it never
+ * writes the on-disk doc index (the MCP tool built on this is annotated read-only). It will read one
+ * that exists, and with a `session` it keeps the index in memory across calls.
  */
-export async function unlinkedFor(repoRoot, config, path, symbol) {
-    return (await unlinkedForWithin(repoRoot, config, path, symbol, Number.POSITIVE_INFINITY, {
+export async function unlinkedFor(repoRoot, config, path, symbol, session, onStats) {
+    const result = await unlinkedForWithin(repoRoot, config, path, symbol, Number.POSITIVE_INFINITY, {
         persist: false,
-    })).claims;
+        ...(session?.state ? { prior: session.state } : {}),
+    });
+    if (session)
+        session.state = result.state;
+    onStats?.(result.index);
+    return result.claims;
 }
 /**
  * {@link unlinkedFor} for callers on a latency budget (the PreToolUse hook), backed by the doc index
@@ -332,6 +337,7 @@ export async function unlinkedForWithin(repoRoot, config, path, symbol, budgetMs
         claims: all.filter((u) => claimsAbout(u, path, symbol)),
         complete: index.complete,
         index: index.stats,
+        state: index.state,
     };
 }
 export async function check(repoRoot, config, onlyPaths, opts = {}) {
