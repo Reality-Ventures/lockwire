@@ -24,7 +24,8 @@ export function formatText(result: CheckResult): string {
     for (const a of noteworthy) {
       const t = `${a.anchor.target.path}${a.anchor.target.symbol ? `#${a.anchor.target.symbol}` : ""}`;
       const label = a.status.toUpperCase().padEnd(9);
-      const tierNote = a.driftedTiers.length ? ` (${a.driftedTiers.join(",")})` : "";
+      const what = [...a.driftedTiers, ...(a.claimChanged ? ["claim"] : [])];
+      const tierNote = what.length ? ` (${what.join(",")})` : "";
       lines.push(`  ${label} ${t}${tierNote}`);
     }
     lines.push("");
@@ -54,6 +55,7 @@ export function formatJson(result: CheckResult, repo: string | null): string {
       target: `${r.anchor.target.path}${r.anchor.target.symbol ? `#${r.anchor.target.symbol}` : ""}`,
       status: r.status,
       driftedTiers: r.driftedTiers,
+      claimChanged: r.claimChanged ?? false,
       excerpt: r.anchor.claim?.excerpt ?? null,
     })),
   };
@@ -67,10 +69,15 @@ export function formatGithub(result: CheckResult): string {
     const target = `${r.anchor.target.path}${r.anchor.target.symbol ? `#${r.anchor.target.symbol}` : ""}`;
     const file = r.anchor.doc ?? r.anchor.target.path;
     const line = r.anchor.claim?.line ?? 1;
+    const what = [...r.driftedTiers, ...(r.claimChanged ? ["claim"] : [])].join(",");
     const message =
       r.status === "orphaned"
-        ? `lockwire: "${target}" no longer exists — this claim is orphaned`
-        : `lockwire: "${target}" drifted on ${r.driftedTiers.join(",")} — this claim may be stale`;
+        ? r.claimChanged
+          ? `lockwire: the claim bound to "${target}" was removed from the doc — unlink it or restore the marker`
+          : `lockwire: "${target}" no longer exists — this claim is orphaned`
+        : r.claimChanged && r.driftedTiers.length === 0
+          ? `lockwire: the claim text bound to "${target}" was edited — re-verify it against the code, then run lockwire link`
+          : `lockwire: "${target}" drifted on ${what} — this claim may be stale`;
     lines.push(`::error file=${file},line=${line}::${message}`);
   }
   return lines.join("\n");

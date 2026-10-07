@@ -25,6 +25,8 @@ export interface AnchorTarget {
 export interface AnchorClaim {
     line: number;
     hash: string;
+    /** Whitespace-insensitive hash of the claim text; absent on anchors linked before it existed. */
+    normHash?: string;
     excerpt: string;
 }
 export interface Waiver {

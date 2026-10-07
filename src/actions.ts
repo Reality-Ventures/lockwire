@@ -13,7 +13,7 @@ import {
   upsertAnchor,
   writeLockfile,
 } from "./lockfile.js";
-import { scanMarkers, stampMarkerLine } from "./markers.js";
+import { claimUnchanged, type DocMarker, scanMarkers, stampMarkerLine } from "./markers.js";
 import { globToRegExp, matchesAny, toRepoRelative, walkFiles } from "./repo.js";
 import type { Actor, Anchor, FileSymbols, Fingerprints, LockwireConfig, Tier } from "./types.js";
 import { ALL_TIERS } from "./types.js";
@@ -126,13 +126,6 @@ export async function linkDoc(
 
   for (const marker of markers) {
     const existing = marker.id ? current.anchors.find((a) => a.id === marker.id) : undefined;
-    if (existing?.status === "drifted" && !opts.reviewed) {
-      result.skipped.push({
-        reason: "drifted anchor needs --reviewed to re-stamp",
-        target: marker.target.path,
-      });
-      continue;
-    }
 
     const resolved = await resolveTarget(repoRoot, marker.target, config);
     if (!resolved || !resolved.found) {
@@ -143,13 +136,31 @@ export async function linkDoc(
       continue;
     }
 
+    // Re-stamping a drifted anchor accepts the new code, so it needs a human's say-so -- unless the
+    // drift is only the claim sentence having been edited and the code still matches.
+    const codeDrifted =
+      existing !== undefined &&
+      existing.tiers.some((t) => resolved.fingerprints[t] !== existing.fingerprints[t]);
+    if (existing?.status === "drifted" && codeDrifted && !opts.reviewed) {
+      result.skipped.push({
+        reason: "drifted anchor needs --reviewed to re-stamp",
+        target: marker.target.path,
+      });
+      continue;
+    }
+
     const tiers =
       marker.tiers ?? (marker.target.symbol ? (["sig"] as Tier[]) : (["path", "body"] as Tier[]));
     const id = marker.id ?? newAnchorId();
     const anchor: Anchor = {
       id,
       doc: docPath,
-      claim: { line: marker.claimLine, hash: marker.claimHash, excerpt: marker.claimExcerpt },
+      claim: {
+        line: marker.claimLine,
+        hash: marker.claimHash,
+        normHash: marker.claimNormHash,
+        excerpt: marker.claimExcerpt,
+      },
       target: marker.target,
       tiers,
       fingerprints: resolved.fingerprints,
@@ -231,6 +242,8 @@ export interface AnchorCheckResult {
   anchor: Anchor;
   status: Anchor["status"];
   driftedTiers: Tier[];
+  /** The claim sentence in the doc was edited (or its marker removed) since the anchor was stamped. */
+  claimChanged?: boolean;
   singleHashWouldFlag: boolean; // any of the four tiers changed, regardless of binding
 }
 
@@ -259,9 +272,21 @@ export async function check(
   const now = new Date().toISOString();
   const results: AnchorCheckResult[] = [];
   let current = lockfile;
+  const docMarkers = new Map<string, DocMarker[] | null>();
+  async function markersIn(doc: string): Promise<DocMarker[] | null> {
+    if (!docMarkers.has(doc)) {
+      const abs = `${repoRoot}/${doc}`;
+      docMarkers.set(doc, existsSync(abs) ? scanMarkers(await readFile(abs, "utf8")) : null);
+    }
+    return docMarkers.get(doc) ?? null;
+  }
 
   for (const anchor of lockfile.anchors) {
-    if (onlyPaths && !onlyPaths.includes(anchor.target.path)) {
+    const inScope =
+      !onlyPaths ||
+      onlyPaths.includes(anchor.target.path) ||
+      (anchor.doc !== null && onlyPaths.includes(anchor.doc));
+    if (!inScope) {
       results.push({ anchor, status: anchor.status, driftedTiers: [], singleHashWouldFlag: false });
       continue;
     }
@@ -292,6 +317,35 @@ export async function check(
     if (anchor.status === "superseded") {
       results.push({ anchor, status: "superseded", driftedTiers: [], singleHashWouldFlag: false });
       continue;
+    }
+
+    // The other half of the binding: has the sentence itself been rewritten, or its marker removed?
+    let claimChanged = false;
+    if (anchor.doc && anchor.claim) {
+      const marker = (await markersIn(anchor.doc))?.find((m) => m.id === anchor.id);
+      if (!marker) {
+        const orphaned: Anchor = { ...anchor, status: "orphaned" };
+        if (anchor.status !== "orphaned") {
+          current = upsertAnchor(current, orphaned);
+          await appendEvent(repoRoot, {
+            ts: now,
+            event: "anchor.orphaned",
+            anchor: anchor.id,
+            actor: { type: "unknown" },
+            commit: null,
+            note: "claim marker removed from doc",
+          });
+        }
+        results.push({
+          anchor: orphaned,
+          status: "orphaned",
+          driftedTiers: [],
+          claimChanged: true,
+          singleHashWouldFlag: true,
+        });
+        continue;
+      }
+      claimChanged = !claimUnchanged(anchor.claim, marker);
     }
 
     let resolved: TargetResolution | null;
@@ -393,7 +447,7 @@ export async function check(
       (t) => resolved!.fingerprints[t] !== anchor.fingerprints[t],
     );
 
-    if (driftedTiers.length > 0) {
+    if (driftedTiers.length > 0 || claimChanged) {
       const drifted: Anchor = { ...anchor, status: "drifted" };
       if (anchor.status !== "drifted") {
         current = upsertAnchor(current, drifted);
@@ -409,11 +463,22 @@ export async function check(
             to: resolved.fingerprints[tier],
           });
         }
+        if (claimChanged) {
+          await appendEvent(repoRoot, {
+            ts: now,
+            event: "anchor.drifted",
+            anchor: anchor.id,
+            actor: { type: "unknown" },
+            commit: null,
+            note: "claim text changed",
+          });
+        }
       }
       results.push({
         anchor: drifted,
         status: "drifted",
         driftedTiers,
+        ...(claimChanged ? { claimChanged } : {}),
         singleHashWouldFlag: anyTierChanged.length > 0,
       });
     } else {
@@ -450,8 +515,11 @@ export async function check(
     await writeLockfile(repoRoot, current);
 
   const singleHashWouldFlag = results.filter((r) => r.singleHashWouldFlag).length;
+  // The noise comparison is about code fingerprints; a claim-only flag has no single-hash counterpart.
   const tieredFlagged = results.filter(
-    (r) => r.status === "drifted" || r.status === "orphaned",
+    (r) =>
+      (r.status === "drifted" || r.status === "orphaned") &&
+      !(r.claimChanged && r.driftedTiers.length === 0),
   ).length;
   const reductionPercent =
     singleHashWouldFlag === 0

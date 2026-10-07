@@ -57,12 +57,14 @@ export async function claimsForPath(repoRoot, touchedPath) {
 export async function reportDriftFor(repoRoot, touchedPath) {
     const config = await readConfig(repoRoot);
     const result = await check(repoRoot, config, [touchedPath]);
-    const relevant = result.results.filter((r) => r.anchor.target.path === touchedPath && (r.status === "drifted" || r.status === "orphaned"));
+    const relevant = result.results.filter((r) => (r.anchor.target.path === touchedPath || r.anchor.doc === touchedPath) &&
+        (r.status === "drifted" || r.status === "orphaned"));
     if (relevant.length === 0)
         return { text: "", anyDrift: false };
     const lines = relevant.map((r) => {
         const target = `${r.anchor.target.path}${r.anchor.target.symbol ? `#${r.anchor.target.symbol}` : ""}`;
-        return `- ${r.anchor.doc ?? "(lockfile-only)"} on ${target} is now ${r.status}${r.driftedTiers.length ? ` (${r.driftedTiers.join(",")})` : ""}`;
+        const what = [...r.driftedTiers, ...(r.claimChanged ? ["claim"] : [])];
+        return `- ${r.anchor.doc ?? "(lockfile-only)"} on ${target} is now ${r.status}${what.length ? ` (${what.join(",")})` : ""}`;
     });
     return {
         text: [

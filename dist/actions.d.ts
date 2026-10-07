@@ -40,6 +40,8 @@ export interface AnchorCheckResult {
     anchor: Anchor;
     status: Anchor["status"];
     driftedTiers: Tier[];
+    /** The claim sentence in the doc was edited (or its marker removed) since the anchor was stamped. */
+    claimChanged?: boolean;
     singleHashWouldFlag: boolean;
 }
 export interface CheckSummary {

@@ -40,6 +40,16 @@ All four fingerprints are always computed and stored, but only the tiers listed 
 
 A whole-file anchor (no `#Symbol`) binds `path` and `body` by default; a symbol anchor binds `sig` by default. Most prose only needs `sig` — that's the entire point. A doc claiming "takes a `UserId`, returns a `Session`" cares about the contract, not the implementation, and binding `sig` makes it immune to every refactor that doesn't touch the contract.
 
+## The claim side of the binding
+
+The fingerprint only covers half of the contract. The anchor also stores a hash of the claim sentence it was stamped against (`claim.normHash`, whitespace-insensitive), and `lockwire check` re-reads the doc and compares:
+
+- **Sentence rewritten** → `drifted`, shown as `(claim)`. The code hasn't moved, but the claim is no longer the one anyone verified against it. Re-verify it, then `lockwire link <doc>` re-stamps it — no `--reviewed` needed when only the sentence changed.
+- **Marker deleted (or the doc removed)** → `orphaned`. Use `lockwire unlink <id>` for a deliberate removal, or restore the marker and re-link.
+- **Re-wrapping or reformatting** the sentence is ignored. Anchors linked before `normHash` existed fall back to the raw hash, and to the stored excerpt for short claims, so upgrading doesn't flag them.
+
+This still isn't a truth check: a sentence can be edited into something false while the code matches. It makes edits to a bound claim visible and forces a re-verification, nothing more.
+
 ## How normalization actually works (v0.1)
 
 The `body` tier walks the AST of the symbol's implementation and serializes it recursively: every node becomes `(type child child …)`, comments are dropped entirely, and identifiers that were declared as parameters or local variables (`let`/`const`/`var` in TS/JS, assignment targets and `for` loop targets in Python) are replaced with positional aliases (`$1`, `$2`, …) in first-seen order. Everything else — operators, keywords, string and number literal contents, calls to things declared outside the symbol — is kept as-is. This means:

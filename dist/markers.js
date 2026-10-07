@@ -38,6 +38,7 @@ export function scanMarkers(text) {
             id,
             claimLine,
             claimHash: fingerprint(claimText),
+            claimNormHash: fingerprint(flatten(claimText)),
             claimExcerpt: excerpt(claimText),
         });
     }
@@ -73,9 +74,24 @@ function captureFollowingBlock(lines, startIdx) {
     }
     return { claimLine, text: collected.join("\n") };
 }
+function flatten(text) {
+    return text.replace(/\s+/g, " ").trim();
+}
 function excerpt(text, max = 90) {
-    const flat = text.replace(/\s+/g, " ").trim();
+    const flat = flatten(text);
     return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+/**
+ * Whether the claim sentence an anchor was stamped against is still the one in the doc. Whitespace
+ * and line-wrapping changes don't count. Anchors linked before `normHash` existed fall back to the
+ * raw hash, then to the stored excerpt when it holds the whole claim (it isn't truncated).
+ */
+export function claimUnchanged(stored, current) {
+    if (stored.normHash)
+        return current.claimNormHash === stored.normHash;
+    if (current.claimHash === stored.hash)
+        return true;
+    return !stored.excerpt.endsWith("…") && current.claimExcerpt === stored.excerpt;
 }
 /** Rewrites a marker line to carry its stamped id, preserving any tier spec already present. */
 export function stampMarkerLine(line, id) {
