@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
+import { headCommit } from "./changed.js";
 import { computeWholeFileTiers, extractFileSymbols, fileExportsFingerprint } from "./extract.js";
 import { langForPath, parserFor } from "./grammar.js";
 import { fingerprint, fingerprintSet } from "./hash.js";
@@ -126,6 +127,7 @@ export async function linkDoc(
   let docChanged = false;
   let current = lockfile;
   const idsSeenInDoc = new Set<string>();
+  const commit = opts.commit ?? headCommit(repoRoot);
 
   for (const marker of markers) {
     const targetLabel = `${marker.target.path}${marker.target.symbol ? `#${marker.target.symbol}` : ""}`;
@@ -198,7 +200,7 @@ export async function linkDoc(
       target: marker.target,
       tiers,
       fingerprints: resolved.fingerprints,
-      linked: { at: new Date().toISOString(), commit: opts.commit ?? null, by: actor },
+      linked: { at: new Date().toISOString(), commit, by: actor },
       status: "fresh",
       waiver: null,
     };
@@ -217,7 +219,7 @@ export async function linkDoc(
         event: "anchor.created",
         anchor: id,
         actor,
-        commit: opts.commit ?? null,
+        commit,
       });
     } else {
       result.refreshed++;
@@ -226,7 +228,7 @@ export async function linkDoc(
         event: "anchor.resolved",
         anchor: id,
         actor,
-        commit: opts.commit ?? null,
+        commit,
         note: "re-stamped via link",
       });
     }
@@ -303,13 +305,20 @@ export async function check(
   repoRoot: string,
   config: LockwireConfig,
   onlyPaths?: readonly string[],
-  opts: { write?: boolean } = {},
+  opts: { write?: boolean; actor?: Actor } = {},
 ): Promise<CheckResult> {
   // `write: false` is a dry run: same results, but nothing is persisted (CI and pre-commit gates
   // shouldn't dirty the working tree or append to the ledger).
   const write = opts.write !== false;
-  const emit = (record: Parameters<typeof appendEvent>[1]) =>
-    write ? appendEvent(repoRoot, record) : Promise.resolve(null);
+  // Who ran the check that noticed: the AI tool for a hook right after its edit, the person or CI job
+  // for the CLI. `unknown` only when a caller doesn't say.
+  const checkActor: Actor = opts.actor ?? { type: "unknown" };
+  let commit: string | null | undefined; // resolved once per check, and only if something is recorded
+  const emit = (record: Parameters<typeof appendEvent>[1]) => {
+    if (!write) return Promise.resolve(null);
+    commit ??= headCommit(repoRoot);
+    return appendEvent(repoRoot, { ...record, commit });
+  };
   const lockfile = await readLockfile(repoRoot);
   const now = new Date().toISOString();
   const results: AnchorCheckResult[] = [];
@@ -349,7 +358,7 @@ export async function check(
           ts: now,
           event: "waiver.expired",
           anchor: anchor.id,
-          actor: { type: "unknown" },
+          actor: checkActor,
           commit: null,
         });
         // A lapsed waiver just stops suppressing: re-evaluate the anchor from the code like any other,
@@ -379,7 +388,7 @@ export async function check(
             ts: now,
             event: "anchor.orphaned",
             anchor: anchor.id,
-            actor: { type: "unknown" },
+            actor: checkActor,
             commit: null,
             note: "claim marker removed from doc",
           });
@@ -411,7 +420,7 @@ export async function check(
           ts: now,
           event: "anchor.orphaned",
           anchor: anchor.id,
-          actor: { type: "unknown" },
+          actor: checkActor,
           commit: null,
           note: "file not found",
         });
@@ -473,7 +482,7 @@ export async function check(
           ts: now,
           event: "anchor.relocated",
           anchor: anchor.id,
-          actor: { type: "unknown" },
+          actor: checkActor,
           commit: null,
           note: `${anchor.target.symbol} -> ${relocatedTo}`,
         });
@@ -482,7 +491,7 @@ export async function check(
             ts: now,
             event: "anchor.drifted",
             anchor: anchor.id,
-            actor: { type: "unknown" },
+            actor: checkActor,
             commit: null,
             tier,
             from: anchor.fingerprints[tier],
@@ -503,7 +512,7 @@ export async function check(
             ts: now,
             event: "anchor.orphaned",
             anchor: anchor.id,
-            actor: { type: "unknown" },
+            actor: checkActor,
             commit: null,
             note: "symbol not found",
           });
@@ -534,7 +543,7 @@ export async function check(
             ts: now,
             event: "anchor.drifted",
             anchor: anchor.id,
-            actor: { type: "unknown" },
+            actor: checkActor,
             commit: null,
             tier,
             from: anchor.fingerprints[tier],
@@ -546,7 +555,7 @@ export async function check(
             ts: now,
             event: "anchor.drifted",
             anchor: anchor.id,
-            actor: { type: "unknown" },
+            actor: checkActor,
             commit: null,
             note: "claim text changed",
           });
@@ -567,7 +576,7 @@ export async function check(
           ts: now,
           event: "anchor.resolved",
           anchor: anchor.id,
-          actor: { type: "unknown" },
+          actor: checkActor,
           commit: null,
         });
         results.push({

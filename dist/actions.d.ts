@@ -66,6 +66,7 @@ export interface CheckResult {
 }
 export declare function check(repoRoot: string, config: LockwireConfig, onlyPaths?: readonly string[], opts?: {
     write?: boolean;
+    actor?: Actor;
 }): Promise<CheckResult>;
 export declare function discoverDocs(repoRoot: string, config: LockwireConfig): Promise<string[]>;
 export declare function ack(repoRoot: string, anchorId: string, resolution: "updated" | "superseded" | "false-positive", note: string | undefined, actor: Actor, config: LockwireConfig): Promise<Anchor>;

@@ -3,7 +3,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { check, refs } from "./actions.js";
 import { readConfig } from "./config.js";
 import { toPosix, toRepoRelative, tryFindRepoRoot } from "./repo.js";
-import type { Anchor, LockwireConfig } from "./types.js";
+import type { Actor, Anchor, LockwireConfig } from "./types.js";
 
 export interface HookInput {
   tool_name?: string;
@@ -69,12 +69,22 @@ export async function claimsForPath(repoRoot: string, touchedPath: string): Prom
   return refs(repoRoot, touchedPath);
 }
 
+/** The agent that just made the edit, for ledger attribution: the PostToolUse hook runs right after it. */
+export function hookActor(tool: string, input: HookInput): Actor {
+  return {
+    type: "ai",
+    tool: { name: tool },
+    ...(input.session_id ? { session: input.session_id } : {}),
+  };
+}
+
 export async function reportDriftFor(
   repoRoot: string,
   touchedPath: string,
+  actor?: Actor,
 ): Promise<{ text: string; anyDrift: boolean }> {
   const config = await readConfig(repoRoot);
-  const result = await check(repoRoot, config, [touchedPath]);
+  const result = await check(repoRoot, config, [touchedPath], actor ? { actor } : {});
   const relevant = result.results.filter(
     (r) =>
       (r.anchor.target.path === touchedPath || r.anchor.doc === touchedPath) &&

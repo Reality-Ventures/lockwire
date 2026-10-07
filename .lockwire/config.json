@@ -12,8 +12,5 @@
   "hook": {
     "mode": "advisory",
     "maxClaimsInContext": 8
-  },
-  "noiseBudget": {
-    "maxStalePercent": 25
   }
 }

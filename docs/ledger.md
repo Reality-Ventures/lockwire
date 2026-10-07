@@ -12,22 +12,27 @@
 {
   "v": 1,
   "id": "0M8X2FQJKL",
-  "ts": "2026-09-25T14:12:03Z",
+  "ts": "2026-09-25T14:12:03.656Z",
   "event": "anchor.drifted",
   "anchor": "k7q2m9xv",
   "tier": "sig",
   "from": "b3:91ccabc123…",
   "to": "b3:38ff456def…",
   "commit": "a71bd09",
-  "actor": { "type": "ai", "model_id": "anthropic/claude-opus-5-5", "tool": { "name": "claude-code" } },
+  "actor": { "type": "ai", "tool": { "name": "claude-code" }, "session": "abc-123" },
   "hash": "b3:c42dabc987…"
 }
 ```
 
+### Who and which commit
+
+- **`commit`** is the short SHA of `HEAD` when the event was recorded, or `null` outside a git repository or before the first commit. For a drift event that is the commit the working tree was based on, not the one that will eventually contain the change — `git blame` on the drifted lines answers that.
+- **`actor`** is whoever ran the check that noticed. The `PostToolUse` hook runs right after an agent's edit, so for hook-detected drift that is the agent and its session (`claude-code` or `codex`); `lockwire check` from a shell records `human`, a CI job records `unknown` with tool `ci`, and a shell inside Claude Code or Codex records that agent. The MCP server records `mcp`. Events a caller doesn't attribute say `unknown` rather than guess. Neither field is proof of authorship — the ledger is tamper-evident, not a signed audit trail.
+
 `hash` is BLAKE3 over the canonical JSON (sorted keys, no whitespace) of every other field. `lockwire ledger verify` recomputes it for every line and reports which lines, if any, don't match — see [`src/ledger.ts`](../src/ledger.ts).
 
 <!-- lockwire src/ledger.ts#appendEvent sig id=g849y7xt -->
-`appendEvent` takes the repo root and an event missing its `v`, `id`, and `hash` fields, computes those three, appends the line, and returns the full record it wrote.
+`appendEvent` takes the repo root and an event missing its `v`, `id`, and `hash` fields, computes those three (and fills in `commit` from `HEAD` when the caller passes `null`), appends the line, and returns the full record it wrote.
 
 ## Event vocabulary
 

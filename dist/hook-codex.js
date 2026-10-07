@@ -1,5 +1,5 @@
 import { readConfig } from "./config.js";
-import { absoluteHookPath, buildAdvisoryText, claimsForPath, logHookError, normalizeTouchedPath, readStdinJson, reportDriftFor, resolveHookRoot, } from "./hook-common.js";
+import { absoluteHookPath, buildAdvisoryText, claimsForPath, hookActor, logHookError, normalizeTouchedPath, readStdinJson, reportDriftFor, resolveHookRoot, } from "./hook-common.js";
 /**
  * Codex PreToolUse/PostToolUse adapter. Codex can deny a tool call but cannot rewrite its input,
  * so `ask` mode degrades to advisory here — see LOCKWIRE-SPEC.md §6 for the verified caveat on
@@ -40,7 +40,7 @@ export async function runCodexHook(adapter, fallbackRoot) {
             process.stdout.write(JSON.stringify(output));
         }
         else {
-            const { text, anyDrift } = await reportDriftFor(repoRoot, touched);
+            const { text, anyDrift } = await reportDriftFor(repoRoot, touched, hookActor("codex", input));
             if (!anyDrift)
                 return;
             process.stdout.write(JSON.stringify({

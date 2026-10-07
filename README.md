@@ -24,20 +24,21 @@ A sentence in your docs is a claim about a specific state of your code. Nothing 
 
 ```
 $ lockwire check
-
 CLAUDE.md
   DRIFTED   src/auth/session.ts#createSession (sig)
-  ok        src/auth/provider.ts#AuthConfig
 
-1 anchor · 1 ok · 1 drifted · 0 orphaned
+2 anchors · 1 ok · 1 drifted · 0 orphaned
 single-hash would flag 1 · lockwire flagged 1 · noise −0%
 ```
 
 ```
 $ lockwire history k7q2m9xv
-2026-09-25T10:00:11Z  anchor.created
-2026-09-25T14:12:03Z  anchor.drifted        sig  param `ttl: number` added
+2026-09-25T10:00:11.579Z  anchor.created
+2026-09-25T14:12:03.656Z  anchor.drifted       sig
+2026-09-25T14:15:40.726Z  anchor.resolved       re-stamped via link
 ```
+
+Each event records which tier moved, the commit it happened on, and who ran the check that noticed (the agent and session for a hook, the person or CI job for the CLI) — see [docs/ledger.md](docs/ledger.md).
 
 ---
 
@@ -115,22 +116,27 @@ flowchart TB
 stateDiagram-v2
     [*] --> Fresh: lockwire link<br/><i>anchor.created</i>
 
-    Fresh --> Drifted: bound tier changed<br/><i>anchor.drifted</i>
-    Fresh --> Relocated: symbol not at path,<br/>exactly one sig match<br/>elsewhere in the file<br/><i>anchor.relocated</i>
-    Fresh --> Orphaned: symbol or file gone<br/><i>anchor.orphaned</i>
+    Fresh --> Drifted: a bound tier changed, or the claim<br/>sentence was edited<br/><i>anchor.drifted</i>
+    Fresh --> Fresh: symbol renamed in the same file,<br/>exactly one match<br/><i>anchor.relocated</i>
+    Fresh --> Orphaned: symbol, file or doc marker gone<br/><i>anchor.orphaned</i>
 
-    Drifted --> Fresh: doc updated + link --reviewed<br/><i>anchor.resolved</i>
+    Drifted --> Fresh: doc updated + link --reviewed,<br/>or ack<br/><i>anchor.resolved / anchor.acknowledged</i>
     Drifted --> Waived: time-boxed waiver<br/><i>waiver.granted</i>
     Drifted --> Superseded: claim no longer applies<br/><i>anchor.acknowledged</i>
 
-    Waived --> Drifted: waiver expires<br/><i>waiver.expired</i>
+    Waived --> Fresh: waiver expires, nothing moved
+    Waived --> Drifted: waiver expires, something moved<br/><i>waiver.expired</i>
+
+    Orphaned --> Fresh: marker or symbol restored,<br/>then link
 
     Superseded --> [*]
 
-    note right of Relocated
-        Same-file rename detection only in P0.
-        A symbol moved to a different file
-        still reports orphaned — see
+    note right of Fresh
+        Relocation is an event, not a state: after a
+        rename the anchor is just fresh (or drifted,
+        if a bound tier also moved) under its new
+        name. Same-file renames only in P0; a symbol
+        moved to another file reports orphaned — see
         docs/concepts.md limitations.
     end note
 ```
@@ -238,7 +244,7 @@ Refactor the function's body without touching its signature, then check:
 ```bash
 $ lockwire check
 CLAUDE.md
-  ok        src/auth/session.ts#createSession
+  ok
 
 1 anchor · 1 ok · 0 drifted · 0 orphaned
 single-hash would flag 1 · lockwire flagged 0 · noise −100%
@@ -266,9 +272,9 @@ And ask what happened, whenever, from anyone:
 
 ```bash
 $ lockwire history k7q2m9xv
-2026-09-25T10:00:11Z  anchor.created
-2026-09-25T14:12:03Z  anchor.drifted        sig  param `ttl: number` added
-2026-09-25T14:15:40Z  anchor.resolved
+2026-09-25T10:00:11.579Z  anchor.created
+2026-09-25T14:12:03.656Z  anchor.drifted       sig
+2026-09-25T14:15:40.726Z  anchor.resolved       re-stamped via link
 ```
 
 Inside Claude Code, the hook does this automatically — before the edit, you'd see the claim injected as context; after, you'd see exactly which claim just drifted, with no `check` invocation needed. See [docs/agents.md](docs/agents.md) for the injected text.

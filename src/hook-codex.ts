@@ -3,6 +3,7 @@ import {
   absoluteHookPath,
   buildAdvisoryText,
   claimsForPath,
+  hookActor,
   logHookError,
   normalizeTouchedPath,
   readStdinJson,
@@ -51,7 +52,7 @@ export async function runCodexHook(
       }
       process.stdout.write(JSON.stringify(output));
     } else {
-      const { text, anyDrift } = await reportDriftFor(repoRoot, touched);
+      const { text, anyDrift } = await reportDriftFor(repoRoot, touched, hookActor("codex", input));
       if (!anyDrift) return;
       process.stdout.write(
         JSON.stringify({

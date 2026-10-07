@@ -101,9 +101,6 @@ export interface LockwireConfig {
     mode: "advisory" | "ask" | "deny";
     maxClaimsInContext: number;
   };
-  noiseBudget: {
-    maxStalePercent: number;
-  };
 }
 
 export const DEFAULT_CONFIG: LockwireConfig = {
@@ -112,7 +109,6 @@ export const DEFAULT_CONFIG: LockwireConfig = {
   exclude: ["node_modules/**", "dist/**", "**/CHANGELOG.md"],
   normalizeLocals: true,
   hook: { mode: "advisory", maxClaimsInContext: 8 },
-  noiseBudget: { maxStalePercent: 25 },
 };
 
 /** A symbol found in a source file, ready for tier extraction. Produced by extract.ts. */

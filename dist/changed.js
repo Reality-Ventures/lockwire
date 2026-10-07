@@ -62,4 +62,11 @@ export function changedFiles(repoRoot, opts = {}) {
     const untracked = lines(git(["ls-files", "--others", "--exclude-standard"]));
     return [...new Set([...tracked, ...untracked])].sort();
 }
+/**
+ * Short SHA of HEAD in `repoRoot`, or null outside a git repo / before the first commit. Deliberately
+ * not cached: a long-lived process (the MCP server) outlives many commits.
+ */
+export function headCommit(repoRoot) {
+    return tryGit(gitRunner(repoRoot), ["rev-parse", "--short", "HEAD"])?.trim() || null;
+}
 //# sourceMappingURL=changed.js.map

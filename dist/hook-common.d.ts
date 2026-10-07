@@ -1,4 +1,4 @@
-import type { Anchor, LockwireConfig } from "./types.js";
+import type { Actor, Anchor, LockwireConfig } from "./types.js";
 export interface HookInput {
     tool_name?: string;
     tool_input?: {
@@ -22,7 +22,9 @@ export declare function resolveHookRoot(fallbackRoot: string, input: HookInput, 
 export declare function normalizeTouchedPath(repoRoot: string, filePath: string): string;
 export declare function buildAdvisoryText(anchors: Anchor[], config: LockwireConfig): string;
 export declare function claimsForPath(repoRoot: string, touchedPath: string): Promise<Anchor[]>;
-export declare function reportDriftFor(repoRoot: string, touchedPath: string): Promise<{
+/** The agent that just made the edit, for ledger attribution: the PostToolUse hook runs right after it. */
+export declare function hookActor(tool: string, input: HookInput): Actor;
+export declare function reportDriftFor(repoRoot: string, touchedPath: string, actor?: Actor): Promise<{
     text: string;
     anyDrift: boolean;
 }>;

@@ -1,2 +1,3 @@
 {"v":1,"id":"0MUH4YWXW2W0V1A","ts":"2026-09-25T15:49:12.643Z","event":"anchor.created","anchor":"e8rb5adk","actor":{"type":"ai","tool":{"name":"claude-code"}},"commit":null,"hash":"b3:d4c86b4ee5e76e3b7b4e0057e3f506e3"}
 {"v":1,"id":"0MUH4YX3FQ5OKL5","ts":"2026-09-25T15:49:12.842Z","event":"anchor.created","anchor":"g849y7xt","actor":{"type":"ai","tool":{"name":"claude-code"}},"commit":null,"hash":"b3:6905b36eccdfdadc2348fa79deab37a5"}
+{"v":1,"id":"0MUXM6Z04XR44WG","ts":"2026-10-07T04:35:40.851Z","event":"anchor.resolved","anchor":"g849y7xt","actor":{"type":"ai","tool":{"name":"claude-code"}},"commit":"f7a01a1","note":"re-stamped via link","hash":"b3:8cbca4149b1124d20ac88b75983044aa"}

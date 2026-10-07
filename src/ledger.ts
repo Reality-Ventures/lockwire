@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { headCommit } from "./changed.js";
 import { canonicalJson, fingerprint, fingerprintSet } from "./hash.js";
 import { stripBom } from "./repo.js";
 import type { LedgerRecord } from "./types.js";
@@ -21,7 +22,9 @@ export async function appendEvent(
   repoRoot: string,
   record: Omit<LedgerRecord, "v" | "id" | "hash">,
 ): Promise<LedgerRecord> {
-  const withoutHash: Omit<LedgerRecord, "hash"> = { v: 1, id: eventId(), ...record };
+  // Callers that don't know a commit pass null; record the HEAD the event happened on, when there is one.
+  const commit = record.commit ?? headCommit(repoRoot);
+  const withoutHash: Omit<LedgerRecord, "hash"> = { v: 1, id: eventId(), ...record, commit };
   const hash = fingerprint(canonicalJson(withoutHash));
   const full: LedgerRecord = { ...withoutHash, hash };
   const path = ledgerPath(repoRoot);

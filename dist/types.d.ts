@@ -77,9 +77,6 @@ export interface LockwireConfig {
         mode: "advisory" | "ask" | "deny";
         maxClaimsInContext: number;
     };
-    noiseBudget: {
-        maxStalePercent: number;
-    };
 }
 export declare const DEFAULT_CONFIG: LockwireConfig;
 /** A symbol found in a source file, ready for tier extraction. Produced by extract.ts. */

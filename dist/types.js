@@ -6,6 +6,5 @@ export const DEFAULT_CONFIG = {
     exclude: ["node_modules/**", "dist/**", "**/CHANGELOG.md"],
     normalizeLocals: true,
     hook: { mode: "advisory", maxClaimsInContext: 8 },
-    noiseBudget: { maxStalePercent: 25 },
 };
 //# sourceMappingURL=types.js.map

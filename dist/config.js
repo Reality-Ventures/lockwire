@@ -17,7 +17,6 @@ export async function readConfig(repoRoot) {
         exclude: raw.exclude ?? DEFAULT_CONFIG.exclude,
         normalizeLocals: raw.normalizeLocals ?? DEFAULT_CONFIG.normalizeLocals,
         hook: { ...DEFAULT_CONFIG.hook, ...(raw.hook ?? {}) },
-        noiseBudget: { ...DEFAULT_CONFIG.noiseBudget, ...(raw.noiseBudget ?? {}) },
     };
 }
 export async function writeConfig(repoRoot, config) {

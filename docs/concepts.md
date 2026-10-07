@@ -50,6 +50,21 @@ The fingerprint only covers half of the contract. The anchor also stores a hash 
 
 This still isn't a truth check: a sentence can be edited into something false while the code matches. It makes edits to a bound claim visible and forces a re-verification, nothing more.
 
+## What counts as a symbol
+
+An anchor can bind to a **module-level function or class**, to a **member of a class**, and to a **class nested directly in a class body** (`Outer.Inner`, `Outer.Inner.method` — Django's `Model.Meta` is the common case). Anything declared *inside a function* — a helper, a local class, an inner arrow function — is local, not addressable, and never shadows a real symbol of the same name.
+
+| Source | Becomes |
+|---|---|
+| `export function f()` / `def f()` | `f` |
+| `export const f = () => …` / `const f = x => …` / `const f = function () {}` | `f` (a single parameter without parentheses counts as that parameter) |
+| `class K { m() {} }` / `class K: def m(self)` | `K`, `K.m` |
+| `class Outer: class Inner: def m(self)` | `Outer`, `Outer.Inner`, `Outer.Inner.m` |
+| a function or class declared inside a function | nothing |
+| a decorated Python function | `f`, once, with its decorators in `sig` |
+
+TypeScript has an `export` modifier, which is part of `sig`; Python doesn't, so a Python function is never "exported" and a whole-file `sig` binding on a `.py` file sees no exports.
+
 ## How normalization actually works (v0.1)
 
 The `body` tier walks the AST of the symbol's implementation and serializes it recursively: every node becomes `(type child child …)`, comments are dropped entirely, and identifiers that were declared as parameters or local variables (`let`/`const`/`var` in TS/JS, assignment targets and `for` loop targets in Python) are replaced with positional aliases (`$1`, `$2`, …) in first-seen order. Everything else — operators, keywords, string and number literal contents, calls to things declared outside the symbol — is kept as-is. This means:
@@ -64,7 +79,7 @@ Being direct about what v0.1 does not do, because a tool that hides its own edge
 
 - **Local-variable scope isn't real scope analysis.** Every declared name in the symbol's subtree is aliased, regardless of nested-function shadowing. A same-named local in an inner closure is treated identically to the outer one. This is a documented approximation, not a bug to report.
 - **Statement reordering is not normalized.** Moving two independent statements past each other inside a function body changes the AST structure and will register as a `body` drift, even when it provably doesn't change behavior. True reorder-invariance needs dependency analysis beyond what v0.1 does.
-- **Same-file rename detection only.** If a symbol is renamed within the same file, `check` looks for exactly one other symbol in that file sharing the old `sig` fingerprint and auto-relinks (`anchor.relocated`). If the symbol moved to a *different* file, lockwire reports `orphaned`, not `relocated` — a repo-wide symbol index for cross-file matching is a P1 item, not P0.
+- **Same-file rename detection only.** If a symbol is renamed within the same file, `check` looks for exactly one other symbol in that file whose signature matches once the name is ignored (and which no other anchor already binds) and auto-relinks (`anchor.relocated`, counted in `summary.relocated`). Only `sig` is re-stamped: if the rename came with a change to another bound tier, the anchor is reported `drifted` under its new name rather than silently accepted. If the symbol moved to a *different* file, lockwire reports `orphaned`, not `relocated` — a repo-wide symbol index for cross-file matching is a P1 item, not P0.
 - **No cross-language `deps` resolution.** A TypeScript file calling into a Python service (or vice versa) can't be tracked as a dependency; `deps` only sees references resolvable within the same parsed file.
 - **`with ... as` bindings in Python aren't tracked as locals.** A narrow, known gap in the local-declaration collector.
 - **No semantic-claim extraction.** lockwire never reads a claim's *meaning* — only whether the fingerprint of its bound target moved. "We use Redux" staying true when the code has moved to Zustand, with every file path still resolving, is invisible to lockwire by design; that's a job for an LLM-reasoning layer like [ClaudeDrift](https://github.com/marky291/claude-drift), not a hash.

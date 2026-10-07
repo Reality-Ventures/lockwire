@@ -54,9 +54,17 @@ export function buildAdvisoryText(anchors, config) {
 export async function claimsForPath(repoRoot, touchedPath) {
     return refs(repoRoot, touchedPath);
 }
-export async function reportDriftFor(repoRoot, touchedPath) {
+/** The agent that just made the edit, for ledger attribution: the PostToolUse hook runs right after it. */
+export function hookActor(tool, input) {
+    return {
+        type: "ai",
+        tool: { name: tool },
+        ...(input.session_id ? { session: input.session_id } : {}),
+    };
+}
+export async function reportDriftFor(repoRoot, touchedPath, actor) {
     const config = await readConfig(repoRoot);
-    const result = await check(repoRoot, config, [touchedPath]);
+    const result = await check(repoRoot, config, [touchedPath], actor ? { actor } : {});
     const relevant = result.results.filter((r) => (r.anchor.target.path === touchedPath || r.anchor.doc === touchedPath) &&
         (r.status === "drifted" || r.status === "orphaned"));
     if (relevant.length === 0)

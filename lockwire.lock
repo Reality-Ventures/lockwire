@@ -39,8 +39,9 @@
       "id": "g849y7xt",
       "doc": "docs/ledger.md",
       "claim": {
-        "line": 30,
-        "hash": "b3:96a6073e35007a0e3bdb2d8726a33a83",
+        "line": 35,
+        "hash": "b3:60238f038a208e841340cebcb8ee95b0",
+        "normHash": "b3:60238f038a208e841340cebcb8ee95b0",
         "excerpt": "`appendEvent` takes the repo root and an event missing its `v`, `id`, and `hash` fields, …"
       },
       "target": {
@@ -53,12 +54,12 @@
       "fingerprints": {
         "path": "b3:58a6218c217af2d48e135f75150974de",
         "sig": "b3:5e0defe55ca129019b0d58af4ca75998",
-        "body": "b3:a286a9371dd42642d5addbb84ab7e805",
-        "deps": "b3:eaafafee3950fa6ced27f82fa3da682d"
+        "body": "b3:fd7aaabc2d76a53f66bca3d73288a2da",
+        "deps": "b3:d213dba979da0fdb35bc946549ed3b17"
       },
       "linked": {
-        "at": "2026-09-25T15:49:12.842Z",
-        "commit": null,
+        "at": "2026-10-07T04:35:40.851Z",
+        "commit": "f7a01a1",
         "by": {
           "type": "ai",
           "tool": {

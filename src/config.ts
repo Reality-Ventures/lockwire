@@ -19,7 +19,6 @@ export async function readConfig(repoRoot: string): Promise<LockwireConfig> {
     exclude: raw.exclude ?? DEFAULT_CONFIG.exclude,
     normalizeLocals: raw.normalizeLocals ?? DEFAULT_CONFIG.normalizeLocals,
     hook: { ...DEFAULT_CONFIG.hook, ...(raw.hook ?? {}) },
-    noiseBudget: { ...DEFAULT_CONFIG.noiseBudget, ...(raw.noiseBudget ?? {}) },
   };
 }
 

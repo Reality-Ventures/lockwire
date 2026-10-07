@@ -200,10 +200,59 @@ function extractParamsPy(params: Node | null): ParamInfo[] {
   return out;
 }
 
+/** Node types that open a new function scope: anything declared inside one is local, not a symbol. */
+const FUNCTION_LIKE: Record<LangId, Set<string>> = {
+  typescript: new Set([
+    "function_declaration",
+    "function_expression",
+    "function",
+    "generator_function_declaration",
+    "generator_function",
+    "arrow_function",
+    "method_definition",
+  ]),
+  tsx: new Set([
+    "function_declaration",
+    "function_expression",
+    "function",
+    "generator_function_declaration",
+    "generator_function",
+    "arrow_function",
+    "method_definition",
+  ]),
+  javascript: new Set([
+    "function_declaration",
+    "function_expression",
+    "function",
+    "generator_function_declaration",
+    "generator_function",
+    "arrow_function",
+    "method_definition",
+  ]),
+  python: new Set(["function_definition", "lambda"]),
+};
+const CLASS_LIKE = new Set([
+  "class_declaration",
+  "class",
+  "interface_declaration",
+  "class_definition",
+]);
+
+function hasAncestorIn(node: Node, types: Set<string>): boolean {
+  for (let n = node.parent; n; n = n.parent) if (types.has(n.type)) return true;
+  return false;
+}
+
+/** The parameters of a function node, including the paren-less single-parameter arrow form (`x => x + 1`). */
+function paramsOf(node: Node, lang: LangId): ParamInfo[] {
+  const container = node.childForFieldName("parameters");
+  if (container) return lang === "python" ? extractParamsPy(container) : extractParamsTs(container);
+  const single = lang === "python" ? null : node.childForFieldName("parameter");
+  return single ? [{ name: single.text, typed: false, hasDefault: false, variadic: false }] : [];
+}
+
 function sigForFunction(node: Node, name: string, lang: LangId, exported: boolean): string {
-  const isPy = lang === "python";
-  const paramsNode = node.childForFieldName("parameters");
-  const params = isPy ? extractParamsPy(paramsNode) : extractParamsTs(paramsNode);
+  const params = paramsOf(node, lang);
   const paramSig = params
     .map(
       (p) => `${p.variadic ? "..." : ""}${p.name}${p.typed ? ":T" : ""}${p.hasDefault ? "=" : ""}`,
@@ -276,10 +325,7 @@ export function extractFileSymbols(
         ? `class ${name} [${exported ? "export" : ""}]`
         : sigForFunction(defNode, name, lang, exported);
     const bodyNode = defNode.childForFieldName("body") ?? defNode;
-    const params =
-      lang === "python"
-        ? extractParamsPy(defNode.childForFieldName("parameters"))
-        : extractParamsTs(defNode.childForFieldName("parameters"));
+    const params = paramsOf(defNode, lang);
     const locals = collectLocalDeclared(
       bodyNode,
       params.map((p) => p.name),
@@ -303,24 +349,24 @@ export function extractFileSymbols(
     sigIndex.set(sigTokens, list);
   }
 
-  // top-level functions
-  for (const fnNode of root.descendantsOfType([...decl.fn, "decorated_definition"])) {
-    const actual = unwrapDecorated(fnNode);
-    if (!decl.fn.includes(actual.type)) continue;
-    if (actual.parent && [...decl.cls].some((c) => hasAncestorOfType(actual, c))) continue; // handled as a method below
-    const nameNode = actual.childForFieldName("name");
+  // Symbols are module-level functions and classes, and the members of those classes. Anything
+  // declared inside a function (a helper, a local class) is not addressable and must not shadow a
+  // real top-level symbol of the same name.
+  const isLocal = (node: Node) =>
+    hasAncestorIn(node, FUNCTION_LIKE[lang]) || hasAncestorIn(node, CLASS_LIKE);
+
+  // top-level functions (a decorated Python def is visited once, as its function_definition)
+  for (const fnNode of root.descendantsOfType(decl.fn)) {
+    if (isLocal(fnNode)) continue;
+    const nameNode = fnNode.childForFieldName("name");
     if (!nameNode) continue;
-    addSymbol(nameNode.text, "function", actual, isExported(fnNode, decl.wrapper));
+    addSymbol(nameNode.text, "function", fnNode, isExported(fnNode, decl.wrapper));
   }
 
   // top-level `const foo = () => {}` / `const foo = function () {}` — common for TSX components and JS handlers
   if (lang !== "python") {
     for (const declarator of root.descendantsOfType(["variable_declarator"])) {
-      if (
-        hasAncestorOfType(declarator, "function_declaration") ||
-        hasAncestorOfType(declarator, "class_declaration")
-      )
-        continue;
+      if (isLocal(declarator)) continue;
       const value = declarator.childForFieldName("value");
       const nameNode = declarator.childForFieldName("name");
       if (!value || !nameNode || nameNode.type !== "identifier") continue;
@@ -335,34 +381,32 @@ export function extractFileSymbols(
     }
   }
 
-  // classes and their methods
-  for (const clsNode of root.descendantsOfType(decl.cls)) {
+  // classes, their own methods, and classes nested directly in a class body (`Outer.Inner.method`)
+  const methodTypes = lang === "python" ? ["function_definition"] : ["method_definition"];
+  function visitClass(clsNode: Node, prefix: string | null) {
     const nameNode = clsNode.childForFieldName("name");
-    if (!nameNode) continue;
-    const className = nameNode.text;
-    addSymbol(className, "class", clsNode, isExported(clsNode, decl.wrapper));
+    if (!nameNode) return;
+    const path = prefix ? `${prefix}.${nameNode.text}` : nameNode.text;
+    addSymbol(path, "class", clsNode, prefix ? false : isExported(clsNode, decl.wrapper));
     const body = clsNode.childForFieldName("body");
-    if (!body) continue;
-    const methodTypes =
-      lang === "python" ? ["function_definition", "decorated_definition"] : ["method_definition"];
-    for (const mNode of body.descendantsOfType(methodTypes)) {
-      const actual = unwrapDecorated(mNode);
-      const mName = actual.childForFieldName("name");
-      if (!mName) continue;
-      addSymbol(`${className}.${mName.text}`, "method", actual, false);
+    if (!body) return;
+    for (const child of body.namedChildren) {
+      if (!child) continue;
+      const member = unwrapDecorated(child);
+      if (decl.cls.includes(member.type)) {
+        visitClass(member, path);
+        continue;
+      }
+      if (!methodTypes.includes(member.type)) continue;
+      const mName = member.childForFieldName("name");
+      if (mName) addSymbol(`${path}.${mName.text}`, "method", member, false);
     }
+  }
+  for (const clsNode of root.descendantsOfType(decl.cls)) {
+    if (!isLocal(clsNode)) visitClass(clsNode, null);
   }
 
   return { bySymbolPath, sigIndex, fileExports };
-}
-
-function hasAncestorOfType(node: Node, type: string): boolean {
-  let n = node.parent;
-  while (n) {
-    if (n.type === type) return true;
-    n = n.parent;
-  }
-  return false;
 }
 
 export function fileExportsFingerprint(symbols: FileSymbols): string {

@@ -137,7 +137,10 @@ async function main() {
         : positional.length > 0
           ? positional.map((p) => toRepoPath(repoRoot, p))
           : undefined;
-      const result = await check(repoRoot, config, changedOnly, { write: !flags["no-write"] });
+      const result = await check(repoRoot, config, changedOnly, {
+        write: !flags["no-write"],
+        actor,
+      });
       const fmt = typeof flags.format === "string" ? flags.format : "text";
       const out =
         fmt === "json"

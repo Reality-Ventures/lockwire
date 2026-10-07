@@ -120,3 +120,26 @@ describe("UTF-8 BOM in lockwire's own JSON files", () => {
     expect((await readFile(lockPath, "utf8")).startsWith(BOM)).toBe(false);
   });
 });
+
+describe("config.json", () => {
+  it("still loads a config written by an older version, ignoring the retired noiseBudget key", async () => {
+    const dir = await repoWithDoc("");
+    await mkdir(join(dir, ".lockwire"));
+    await writeFile(
+      join(dir, ".lockwire", "config.json"),
+      JSON.stringify({
+        version: 1,
+        hook: { mode: "ask" },
+        noiseBudget: { maxStalePercent: 25 },
+      }),
+      "utf8",
+    );
+    const config = await readConfig(dir);
+    expect(config.hook).toEqual({ mode: "ask", maxClaimsInContext: 8 });
+    expect(config).not.toHaveProperty("noiseBudget");
+  });
+
+  it("`init` no longer writes a noiseBudget block", () => {
+    expect(DEFAULT_CONFIG).not.toHaveProperty("noiseBudget");
+  });
+});

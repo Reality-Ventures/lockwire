@@ -12,5 +12,10 @@ export declare function resolveBase(git: Git, explicit?: string, env?: NodeJS.Pr
  * so an anchor on a file that was moved away is still examined and reports as orphaned.
  */
 export declare function changedFiles(repoRoot: string, opts?: ChangedOptions): string[];
+/**
+ * Short SHA of HEAD in `repoRoot`, or null outside a git repo / before the first commit. Deliberately
+ * not cached: a long-lived process (the MCP server) outlives many commits.
+ */
+export declare function headCommit(repoRoot: string): string | null;
 export {};
 //# sourceMappingURL=changed.d.ts.map

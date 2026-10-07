@@ -3,6 +3,7 @@ import {
   absoluteHookPath,
   buildAdvisoryText,
   claimsForPath,
+  hookActor,
   logHookError,
   normalizeTouchedPath,
   readStdinJson,
@@ -48,7 +49,11 @@ export async function runClaudeHook(
       }
       process.stdout.write(JSON.stringify(output));
     } else {
-      const { text, anyDrift } = await reportDriftFor(repoRoot, touched);
+      const { text, anyDrift } = await reportDriftFor(
+        repoRoot,
+        touched,
+        hookActor("claude-code", input),
+      );
       if (!anyDrift) return;
       process.stdout.write(
         JSON.stringify({

@@ -1,5 +1,5 @@
 import { readConfig } from "./config.js";
-import { absoluteHookPath, buildAdvisoryText, claimsForPath, logHookError, normalizeTouchedPath, readStdinJson, reportDriftFor, resolveHookRoot, } from "./hook-common.js";
+import { absoluteHookPath, buildAdvisoryText, claimsForPath, hookActor, logHookError, normalizeTouchedPath, readStdinJson, reportDriftFor, resolveHookRoot, } from "./hook-common.js";
 /**
  * Claude Code PreToolUse/PostToolUse adapter. Fail-open by contract: any exception here must
  * result in exit 0 with no output, never a broken tool call. See LOCKWIRE-SPEC.md §6.
@@ -38,7 +38,7 @@ export async function runClaudeHook(adapter, fallbackRoot) {
             process.stdout.write(JSON.stringify(output));
         }
         else {
-            const { text, anyDrift } = await reportDriftFor(repoRoot, touched);
+            const { text, anyDrift } = await reportDriftFor(repoRoot, touched, hookActor("claude-code", input));
             if (!anyDrift)
                 return;
             process.stdout.write(JSON.stringify({

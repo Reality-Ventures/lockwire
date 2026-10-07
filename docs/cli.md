@@ -63,7 +63,7 @@ single-hash would flag 3 · lockwire flagged 1 · noise −66.7%
 
 `singleHashWouldFlag` counts anchors where *any* of the four tiers changed, regardless of what's bound — an approximation of what a single-hash tool would report. `tieredFlagged` counts anchors where a *bound* tier changed. The gap between them is the false-positive reduction tiering buys you.
 
-The JSON output follows schema `lockwire.check.v1`:
+`claimChanged` is true when the claim sentence was edited (status `drifted`, `driftedTiers` empty) or its marker was removed (status `orphaned`). A path-scoped run lists only the anchors it examined, and `summary` counts only those. The JSON output follows schema `lockwire.check.v1`:
 
 ```json
 {
@@ -77,7 +77,8 @@ The JSON output follows schema `lockwire.check.v1`:
   },
   "anchors": [
     { "id": "k7q2m9xv", "doc": "CLAUDE.md", "line": 3, "target": "src/auth/session.ts#createSession",
-      "status": "drifted", "driftedTiers": ["sig"], "excerpt": "`createSession` takes a `UserId`…" }
+      "status": "drifted", "driftedTiers": ["sig"], "claimChanged": false,
+      "excerpt": "`createSession` takes a `UserId`…" }
   ]
 }
 ```
@@ -107,15 +108,15 @@ lockwire history CLAUDE.md
 
 ## `lockwire ack <id> --resolution updated|superseded|false-positive [--note "..."]`
 
-Records that drift was handled and logs an `anchor.acknowledged` event. `updated` and `false-positive` re-stamp the anchor's fingerprints to the current code state and set status back to `fresh`; `superseded` marks the anchor `superseded` (the claim no longer applies, and future `check` runs skip it) without touching fingerprints.
+Records that drift was handled and logs an `anchor.acknowledged` event. `updated` and `false-positive` re-stamp the anchor to the current state — the code fingerprints **and** the claim sentence as it now reads in the doc, so an expected claim edit stops being flagged — and set status back to `fresh`. If the target no longer exists there is nothing to re-stamp, so they refuse and point you at `superseded` or `unlink`. `superseded` marks the anchor `superseded` (the claim no longer applies, and future `check` runs skip it) without touching fingerprints.
 
 ```bash
 lockwire ack k7q2m9xv --resolution updated --note "doc rewritten to match the new signature"
 ```
 
-## `lockwire waive <id> --reason "..." --expires YYYY-MM-DD`
+## `lockwire waive <id> --reason "..." --expires <date>`
 
-A time-boxed, logged waiver — sets status to `waived` and logs `waiver.granted`. `check` skips a waived anchor until the expiry date passes, at which point it reverts to `drifted` and logs `waiver.expired`. There is no permanent suppression in lockwire; every waiver has an expiry.
+A time-boxed, logged waiver — sets status to `waived` and logs `waiver.granted`. `--expires` must be a real ISO date in the future (`2026-10-15`, or a full timestamp; a bare date means 00:00 UTC that day); anything else is rejected. `check` skips a waived anchor until the expiry passes. At that point the waiver is dropped, `waiver.expired` is logged, and the anchor is re-evaluated from the code like any other: fresh if nothing moved while it was waived, drifted (with the tiers that moved) if something did. There is no permanent suppression in lockwire; every waiver has an expiry, and a stored expiry that doesn't parse counts as already expired.
 
 ```bash
 lockwire waive k7q2m9xv --reason "signature change ships with the v2 API next sprint" --expires 2026-10-15

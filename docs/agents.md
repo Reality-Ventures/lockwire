@@ -50,7 +50,7 @@ Start with `advisory`. A tool that blocks on day one gets uninstalled on day one
 
 ### Fail-open, by contract
 
-Every hook handler is wrapped in a try/catch. Any exception — a malformed lockfile, an unparseable file, a permissions error — is written to `.lockwire/hook.log` and the hook exits `0` with no output. **A broken hook can never break a tool call.** This is tested behavior, not a hope: see [`src/hook-common.ts`](../src/hook-common.ts)'s `logHookError` and both adapters' outer try/catch.
+Every hook handler is wrapped in a try/catch. Any exception — a malformed lockfile, an unparseable file, a permissions error — is written to `.lockwire/hook.log` and the hook exits `0` with no output. **A broken hook can never break a tool call.** This is tested behavior, not a hope: [`test/hook-failopen.test.ts`](../test/hook-failopen.test.ts) runs all four adapters against a corrupt lockfile, a merge-conflicted lockfile, a corrupt `config.json` and malformed stdin, and asserts exit `0`, no output, and the error in `hook.log`. The mechanism is [`src/hook-common.ts`](../src/hook-common.ts)'s `logHookError` and both adapters' outer try/catch.
 
 ## Codex
 

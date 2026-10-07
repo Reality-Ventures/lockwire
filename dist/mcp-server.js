@@ -84,7 +84,9 @@ export function createServer(repoRoot) {
             return text(note);
         const doc = toRepoPath(repoRoot, docArg, repoRoot);
         const config = await readConfig(repoRoot);
-        const result = await check(repoRoot, config);
+        const result = await check(repoRoot, config, undefined, {
+            actor: { type: "ai", tool: { name: "mcp" } },
+        });
         return text(result.results.filter((r) => r.anchor.doc === doc));
     });
     server.registerTool("lockwire_history", {
