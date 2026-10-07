@@ -1,5 +1,5 @@
 import { readConfig } from "./config.js";
-import { absoluteHookPath, buildAdvisoryText, claimsForPath, hookActor, logHookError, normalizeTouchedPath, readStdinJson, reportDriftFor, resolveHookRoot, } from "./hook-common.js";
+import { absoluteHookPath, buildAdvisoryText, claimsForPath, hookActor, logHookError, normalizeTouchedPath, readStdinJson, reportDriftFor, resolveHookRoot, unlinkedClaimsFor, } from "./hook-common.js";
 /**
  * Claude Code PreToolUse/PostToolUse adapter. Fail-open by contract: any exception here must
  * result in exit 0 with no output, never a broken tool call. See LOCKWIRE-SPEC.md §6.
@@ -19,18 +19,21 @@ export async function runClaudeHook(adapter, fallbackRoot) {
         const config = await readConfig(repoRoot);
         if (adapter === "claude-pre") {
             const anchors = await claimsForPath(repoRoot, touched);
-            if (anchors.length === 0)
+            const unlinked = await unlinkedClaimsFor(repoRoot, config, touched, adapter);
+            if (anchors.length === 0 && unlinked.length === 0)
                 return;
-            const additionalContext = buildAdvisoryText(anchors, config);
+            const additionalContext = buildAdvisoryText(anchors, config, unlinked);
             const output = {
                 hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext },
             };
             const spec = output.hookSpecificOutput;
-            if (config.hook.mode === "ask") {
+            // Only anchored claims can be acknowledged, so only they may ask or block; unlinked ones inform.
+            const mode = anchors.length > 0 ? config.hook.mode : "advisory";
+            if (mode === "ask") {
                 spec.permissionDecision = "ask";
                 spec.permissionDecisionReason = "lockwire: documented claims cover this code";
             }
-            else if (config.hook.mode === "deny") {
+            else if (mode === "deny") {
                 spec.permissionDecision = "deny";
                 spec.permissionDecisionReason =
                     "lockwire: acknowledge the affected claims first (lockwire_claims_for / lockwire ack)";

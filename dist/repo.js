@@ -1,10 +1,17 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 const ALWAYS_SKIP = new Set([".git", "node_modules", ".lockwire"]);
-/** Recursively lists repo-relative, posix paths, skipping `.git`/`node_modules`/`.lockwire` and anything matching `exclude`. */
-export function walkFiles(repoRoot, exclude = []) {
-    const out = [];
+/** Like {@link walkFiles}, but stops at `deadline` (a `Date.now()` timestamp) and says so. */
+export function walkFilesWithin(repoRoot, exclude, deadline) {
+    const files = [];
+    let complete = true;
     function walk(dir) {
+        if (!complete)
+            return;
+        if (Date.now() > deadline) {
+            complete = false;
+            return;
+        }
         for (const entry of readdirSync(dir, { withFileTypes: true })) {
             if (ALWAYS_SKIP.has(entry.name))
                 continue;
@@ -15,11 +22,15 @@ export function walkFiles(repoRoot, exclude = []) {
             if (entry.isDirectory())
                 walk(abs);
             else
-                out.push(rel);
+                files.push(rel);
         }
     }
     walk(repoRoot);
-    return out;
+    return { files, complete };
+}
+/** Recursively lists repo-relative, posix paths, skipping `.git`/`node_modules`/`.lockwire` and anything matching `exclude`. */
+export function walkFiles(repoRoot, exclude = []) {
+    return walkFilesWithin(repoRoot, exclude, Number.POSITIVE_INFINITY).files;
 }
 /** Windows editors (and PowerShell's `Out-File`) prepend a UTF-8 BOM that `JSON.parse` rejects. */
 export function stripBom(text) {
@@ -60,7 +71,7 @@ export function findRepoRoot(startDir) {
  * A small, dependency-free glob matcher: `**` matches across path separators, `*` matches within
  * one segment. Enough for `config.docs`/`config.exclude` defaults; not a full minimatch replacement.
  */
-export function globToRegExp(glob) {
+function compileGlob(glob) {
     let out = "";
     for (let i = 0; i < glob.length; i++) {
         const c = glob[i];
@@ -88,6 +99,15 @@ export function globToRegExp(glob) {
         }
     }
     return new RegExp(`^${out}$`);
+}
+const compiledGlobs = new Map();
+export function globToRegExp(glob) {
+    let re = compiledGlobs.get(glob);
+    if (!re) {
+        re = compileGlob(glob);
+        compiledGlobs.set(glob, re);
+    }
+    return re;
 }
 export function matchesAny(path, globs) {
     return globs.some((g) => globToRegExp(g).test(path));

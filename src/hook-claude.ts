@@ -9,6 +9,7 @@ import {
   readStdinJson,
   reportDriftFor,
   resolveHookRoot,
+  unlinkedClaimsFor,
 } from "./hook-common.js";
 
 /**
@@ -33,16 +34,19 @@ export async function runClaudeHook(
 
     if (adapter === "claude-pre") {
       const anchors = await claimsForPath(repoRoot, touched);
-      if (anchors.length === 0) return;
-      const additionalContext = buildAdvisoryText(anchors, config);
+      const unlinked = await unlinkedClaimsFor(repoRoot, config, touched, adapter);
+      if (anchors.length === 0 && unlinked.length === 0) return;
+      const additionalContext = buildAdvisoryText(anchors, config, unlinked);
       const output: Record<string, unknown> = {
         hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext },
       };
       const spec = output.hookSpecificOutput as Record<string, unknown>;
-      if (config.hook.mode === "ask") {
+      // Only anchored claims can be acknowledged, so only they may ask or block; unlinked ones inform.
+      const mode = anchors.length > 0 ? config.hook.mode : "advisory";
+      if (mode === "ask") {
         spec.permissionDecision = "ask";
         spec.permissionDecisionReason = "lockwire: documented claims cover this code";
-      } else if (config.hook.mode === "deny") {
+      } else if (mode === "deny") {
         spec.permissionDecision = "deny";
         spec.permissionDecisionReason =
           "lockwire: acknowledge the affected claims first (lockwire_claims_for / lockwire ack)";

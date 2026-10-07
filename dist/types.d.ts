@@ -76,6 +76,8 @@ export interface LockwireConfig {
     hook: {
         mode: "advisory" | "ask" | "deny";
         maxClaimsInContext: number;
+        /** Also tell the agent about claims written in docs about the file it's editing that nobody has linked. */
+        unlinkedClaims: boolean;
     };
 }
 export declare const DEFAULT_CONFIG: LockwireConfig;

@@ -21,7 +21,7 @@ import {
   scanMarkers,
   stampMarkerLine,
 } from "./markers.js";
-import { globToRegExp, matchesAny, toRepoRelative, walkFiles } from "./repo.js";
+import { globToRegExp, matchesAny, toRepoRelative, walkFiles, walkFilesWithin } from "./repo.js";
 import type {
   Actor,
   Anchor,
@@ -422,6 +422,9 @@ export async function findUnlinkedMarkers(
   return unlinked;
 }
 
+const claimsAbout = (u: UnlinkedMarker, path: string, symbol?: string) =>
+  symbol ? u.target === `${path}#${symbol}` : u.target === path || u.target.startsWith(`${path}#`);
+
 /** Claims written in the docs about this file (or symbol) that no anchor backs. */
 export async function unlinkedFor(
   repoRoot: string,
@@ -429,16 +432,39 @@ export async function unlinkedFor(
   path: string,
   symbol?: string,
 ): Promise<UnlinkedMarker[]> {
+  return (await unlinkedForWithin(repoRoot, config, path, symbol, Number.POSITIVE_INFINITY)).claims;
+}
+
+/**
+ * {@link unlinkedFor} with a time budget (ms) for callers on a latency budget, like the PreToolUse
+ * hook. `complete` is false when the budget ran out before every doc was read, in which case
+ * `claims` is what was found so far.
+ */
+export async function unlinkedForWithin(
+  repoRoot: string,
+  config: LockwireConfig,
+  path: string,
+  symbol: string | undefined,
+  budgetMs: number,
+): Promise<{ claims: UnlinkedMarker[]; complete: boolean }> {
+  const deadline = Date.now() + budgetMs;
   const lockfile = await readLockfile(repoRoot);
-  const all = await findUnlinkedMarkers(
-    lockfile,
-    await discoverDocs(repoRoot, config),
-    markerReader(repoRoot),
-  );
-  const wanted = symbol ? `${path}#${symbol}` : null;
-  return all.filter((u) =>
-    wanted ? u.target === wanted : u.target === path || u.target.startsWith(`${path}#`),
-  );
+  const walked = walkFilesWithin(repoRoot, config.exclude, deadline);
+  const readMarkers = markerReader(repoRoot);
+  let complete = walked.complete;
+  // Only the docs with a marker about this code matter; find them, then classify just those.
+  const relevant: string[] = [];
+  for (const doc of walked.files.filter((p) => isScannedDoc(p, config))) {
+    if (Date.now() > deadline) {
+      complete = false;
+      break;
+    }
+    const markers = await readMarkers(doc);
+    if (markers?.some((m) => m.target.path === path && (!symbol || m.target.symbol === symbol)))
+      relevant.push(doc);
+  }
+  const all = await findUnlinkedMarkers(lockfile, relevant, readMarkers);
+  return { claims: all.filter((u) => claimsAbout(u, path, symbol)), complete };
 }
 
 export async function check(

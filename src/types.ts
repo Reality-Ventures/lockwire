@@ -100,6 +100,8 @@ export interface LockwireConfig {
   hook: {
     mode: "advisory" | "ask" | "deny";
     maxClaimsInContext: number;
+    /** Also tell the agent about claims written in docs about the file it's editing that nobody has linked. */
+    unlinkedClaims: boolean;
   };
 }
 
@@ -108,7 +110,7 @@ export const DEFAULT_CONFIG: LockwireConfig = {
   docs: ["**/*.md"],
   exclude: ["node_modules/**", "dist/**", "**/CHANGELOG.md"],
   normalizeLocals: true,
-  hook: { mode: "advisory", maxClaimsInContext: 8 },
+  hook: { mode: "advisory", maxClaimsInContext: 8, unlinkedClaims: true },
 };
 
 /** A symbol found in a source file, ready for tier extraction. Produced by extract.ts. */

@@ -5,6 +5,6 @@ export const DEFAULT_CONFIG = {
     docs: ["**/*.md"],
     exclude: ["node_modules/**", "dist/**", "**/CHANGELOG.md"],
     normalizeLocals: true,
-    hook: { mode: "advisory", maxClaimsInContext: 8 },
+    hook: { mode: "advisory", maxClaimsInContext: 8, unlinkedClaims: true },
 };
 //# sourceMappingURL=types.js.map

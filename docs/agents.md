@@ -23,6 +23,19 @@ How lockwire wires into Claude Code, Codex, other agents via skills, and MCP.
 }
 ```
 
+If other docs make claims about the file that nobody has linked — a marker with no anchor behind it, so nothing is checking it — the same context also lists them, with their sentences, so the agent doesn't break an unprotected claim unknowingly:
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "additionalContext": "lockwire: these docs also make claims about this code that nobody has linked, so nothing is checking them:\n- NOTES.md:3 asserts \"`createSession` is only ever called with a valid `UserId`.\" about src/auth/session.ts#createSession (not linked yet)\nTreat them as real claims. Run `lockwire link NOTES.md` so lockwire checks them."
+  }
+}
+```
+
+These are advisory in every mode: only anchored claims can be acknowledged, so only they can make `ask` or `deny` prompt or block. Finding them means reading the docs on each edit, so the scan has a 750 ms budget; if it runs out the hook shows the anchored claims alone and notes it in `.lockwire/hook.log`. Turn it off with `hook.unlinkedClaims: false`.
+
 **`PostToolUse`** (after the edit lands): re-fingerprints the touched file, diffs against the stored anchors, and — if any bound tier moved — reports it:
 
 ```json

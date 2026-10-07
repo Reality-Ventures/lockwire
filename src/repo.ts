@@ -3,21 +3,42 @@ import { dirname, join, relative, resolve } from "node:path";
 
 const ALWAYS_SKIP = new Set([".git", "node_modules", ".lockwire"]);
 
-/** Recursively lists repo-relative, posix paths, skipping `.git`/`node_modules`/`.lockwire` and anything matching `exclude`. */
-export function walkFiles(repoRoot: string, exclude: readonly string[] = []): string[] {
-  const out: string[] = [];
+export interface WalkResult {
+  files: string[];
+  /** False when the walk stopped at its deadline, so `files` is only part of the tree. */
+  complete: boolean;
+}
+
+/** Like {@link walkFiles}, but stops at `deadline` (a `Date.now()` timestamp) and says so. */
+export function walkFilesWithin(
+  repoRoot: string,
+  exclude: readonly string[],
+  deadline: number,
+): WalkResult {
+  const files: string[] = [];
+  let complete = true;
   function walk(dir: string) {
+    if (!complete) return;
+    if (Date.now() > deadline) {
+      complete = false;
+      return;
+    }
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (ALWAYS_SKIP.has(entry.name)) continue;
       const abs = join(dir, entry.name);
       const rel = toRepoRelative(repoRoot, abs);
       if (matchesAny(rel, exclude)) continue;
       if (entry.isDirectory()) walk(abs);
-      else out.push(rel);
+      else files.push(rel);
     }
   }
   walk(repoRoot);
-  return out;
+  return { files, complete };
+}
+
+/** Recursively lists repo-relative, posix paths, skipping `.git`/`node_modules`/`.lockwire` and anything matching `exclude`. */
+export function walkFiles(repoRoot: string, exclude: readonly string[] = []): string[] {
+  return walkFilesWithin(repoRoot, exclude, Number.POSITIVE_INFINITY).files;
 }
 
 /** Windows editors (and PowerShell's `Out-File`) prepend a UTF-8 BOM that `JSON.parse` rejects. */
@@ -63,7 +84,7 @@ export function findRepoRoot(startDir: string): string {
  * A small, dependency-free glob matcher: `**` matches across path separators, `*` matches within
  * one segment. Enough for `config.docs`/`config.exclude` defaults; not a full minimatch replacement.
  */
-export function globToRegExp(glob: string): RegExp {
+function compileGlob(glob: string): RegExp {
   let out = "";
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i];
@@ -86,6 +107,17 @@ export function globToRegExp(glob: string): RegExp {
     }
   }
   return new RegExp(`^${out}$`);
+}
+
+const compiledGlobs = new Map<string, RegExp>();
+
+export function globToRegExp(glob: string): RegExp {
+  let re = compiledGlobs.get(glob);
+  if (!re) {
+    re = compileGlob(glob);
+    compiledGlobs.set(glob, re);
+  }
+  return re;
 }
 
 export function matchesAny(path: string, globs: readonly string[]): boolean {

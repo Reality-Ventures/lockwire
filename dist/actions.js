@@ -7,7 +7,7 @@ import { fingerprint, fingerprintSet } from "./hash.js";
 import { appendEvent, historyFor, readLedger } from "./ledger.js";
 import { anchorsForPath, lockfilePath, newAnchorId, readLockfile, removeAnchor, upsertAnchor, writeLockfile, } from "./lockfile.js";
 import { claimUnchanged, retargetMarkerLine, scanMarkers, stampMarkerLine, } from "./markers.js";
-import { globToRegExp, matchesAny, toRepoRelative, walkFiles } from "./repo.js";
+import { globToRegExp, matchesAny, toRepoRelative, walkFiles, walkFilesWithin } from "./repo.js";
 import { ALL_TIERS } from "./types.js";
 /** Recomputes all four tier fingerprints for a target, or reports it unresolved (file/symbol not found). */
 export async function resolveTarget(repoRoot, target, config) {
@@ -307,12 +307,35 @@ export async function findUnlinkedMarkers(lockfile, docs, readMarkers) {
     }
     return unlinked;
 }
+const claimsAbout = (u, path, symbol) => symbol ? u.target === `${path}#${symbol}` : u.target === path || u.target.startsWith(`${path}#`);
 /** Claims written in the docs about this file (or symbol) that no anchor backs. */
 export async function unlinkedFor(repoRoot, config, path, symbol) {
+    return (await unlinkedForWithin(repoRoot, config, path, symbol, Number.POSITIVE_INFINITY)).claims;
+}
+/**
+ * {@link unlinkedFor} with a time budget (ms) for callers on a latency budget, like the PreToolUse
+ * hook. `complete` is false when the budget ran out before every doc was read, in which case
+ * `claims` is what was found so far.
+ */
+export async function unlinkedForWithin(repoRoot, config, path, symbol, budgetMs) {
+    const deadline = Date.now() + budgetMs;
     const lockfile = await readLockfile(repoRoot);
-    const all = await findUnlinkedMarkers(lockfile, await discoverDocs(repoRoot, config), markerReader(repoRoot));
-    const wanted = symbol ? `${path}#${symbol}` : null;
-    return all.filter((u) => wanted ? u.target === wanted : u.target === path || u.target.startsWith(`${path}#`));
+    const walked = walkFilesWithin(repoRoot, config.exclude, deadline);
+    const readMarkers = markerReader(repoRoot);
+    let complete = walked.complete;
+    // Only the docs with a marker about this code matter; find them, then classify just those.
+    const relevant = [];
+    for (const doc of walked.files.filter((p) => isScannedDoc(p, config))) {
+        if (Date.now() > deadline) {
+            complete = false;
+            break;
+        }
+        const markers = await readMarkers(doc);
+        if (markers?.some((m) => m.target.path === path && (!symbol || m.target.symbol === symbol)))
+            relevant.push(doc);
+    }
+    const all = await findUnlinkedMarkers(lockfile, relevant, readMarkers);
+    return { claims: all.filter((u) => claimsAbout(u, path, symbol)), complete };
 }
 export async function check(repoRoot, config, onlyPaths, opts = {}) {
     // `write: false` is a dry run: same results, but nothing is persisted (CI and pre-commit gates

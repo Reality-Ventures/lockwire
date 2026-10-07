@@ -118,6 +118,7 @@ single-hash would flag 3 · lockwire flagged 1 · noise −66.7%
 | `normalizeLocals` | `true` | Alias local variables in the `body` fingerprint, so renaming a local isn't drift. Changing it changes every `body` fingerprint, so re-link afterwards. |
 | `hook.mode` | `"advisory"` | What the `PreToolUse` hook does: `advisory`, `ask` or `deny` — see [agents.md](agents.md#hook-modes). |
 | `hook.maxClaimsInContext` | `8` | The most claims the hooks inject for one edit; the rest are summarised as "…and N more". |
+| `hook.unlinkedClaims` | `true` | Whether the `PreToolUse` hook also tells the agent about claims in the docs about the file it's editing that nobody has linked. It scans the docs on every edit, within a 750 ms budget; set `false` in a very large repo if you'd rather not pay for that. |
 
 ## `lockwire status [--scope <glob>] [--json]`
 

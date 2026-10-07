@@ -1,3 +1,4 @@
+import { type UnlinkedMarker } from "./actions.js";
 import type { Actor, Anchor, LockwireConfig } from "./types.js";
 export interface HookInput {
     tool_name?: string;
@@ -20,7 +21,15 @@ export declare function absoluteHookPath(input: HookInput, filePath: string): st
 export declare function resolveHookRoot(fallbackRoot: string, input: HookInput, absPath: string): string;
 /** Windows delivers `C:\project\src\index.ts`; hooks compare against posix, repo-relative anchor targets. */
 export declare function normalizeTouchedPath(repoRoot: string, filePath: string): string;
-export declare function buildAdvisoryText(anchors: Anchor[], config: LockwireConfig): string;
+export declare function buildAdvisoryText(anchors: Anchor[], config: LockwireConfig, unlinked?: UnlinkedMarker[]): string;
+/** How long the PreToolUse hook may spend looking for unlinked claims before giving up on them. */
+export declare const UNLINKED_SCAN_BUDGET_MS = 750;
+/**
+ * Claims in the docs about the file about to be edited that no anchor backs. Never throws and never
+ * blocks the edit: the anchored claims are the hook's job, this is a courtesy on top, so any failure
+ * or a blown time budget just means it's left out (and noted in `.lockwire/hook.log`).
+ */
+export declare function unlinkedClaimsFor(repoRoot: string, config: LockwireConfig, touchedPath: string, adapter: string, budgetMs?: number): Promise<UnlinkedMarker[]>;
 export declare function claimsForPath(repoRoot: string, touchedPath: string): Promise<Anchor[]>;
 /** The agent that just made the edit, for ledger attribution: the PostToolUse hook runs right after it. */
 export declare function hookActor(tool: string, input: HookInput): Actor;

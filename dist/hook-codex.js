@@ -1,5 +1,5 @@
 import { readConfig } from "./config.js";
-import { absoluteHookPath, buildAdvisoryText, claimsForPath, hookActor, logHookError, normalizeTouchedPath, readStdinJson, reportDriftFor, resolveHookRoot, } from "./hook-common.js";
+import { absoluteHookPath, buildAdvisoryText, claimsForPath, hookActor, logHookError, normalizeTouchedPath, readStdinJson, reportDriftFor, resolveHookRoot, unlinkedClaimsFor, } from "./hook-common.js";
 /**
  * Codex PreToolUse/PostToolUse adapter. Codex can deny a tool call but cannot rewrite its input,
  * so `ask` mode degrades to advisory here — see LOCKWIRE-SPEC.md §6 for the verified caveat on
@@ -26,13 +26,15 @@ export async function runCodexHook(adapter, fallbackRoot) {
         const config = await readConfig(repoRoot);
         if (adapter === "codex-pre") {
             const anchors = await claimsForPath(repoRoot, touched);
-            if (anchors.length === 0)
+            const unlinked = await unlinkedClaimsFor(repoRoot, config, touched, adapter);
+            if (anchors.length === 0 && unlinked.length === 0)
                 return;
-            const additionalContext = buildAdvisoryText(anchors, config);
+            const additionalContext = buildAdvisoryText(anchors, config, unlinked);
             const output = {
                 hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext },
             };
-            if (config.hook.mode === "deny") {
+            // Only anchored claims can be acknowledged, so only they may block; unlinked ones inform.
+            if (anchors.length > 0 && config.hook.mode === "deny") {
                 output.hookSpecificOutput.permissionDecision = "deny";
                 output.hookSpecificOutput.permissionDecisionReason =
                     "lockwire: acknowledge the affected claims first";

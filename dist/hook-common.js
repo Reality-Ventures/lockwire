@@ -1,6 +1,6 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { check, refs } from "./actions.js";
+import { check, refs, unlinkedForWithin } from "./actions.js";
 import { readConfig } from "./config.js";
 import { toPosix, toRepoRelative, tryFindRepoRoot } from "./repo.js";
 export async function readStdinJson() {
@@ -34,22 +34,62 @@ export function normalizeTouchedPath(repoRoot, filePath) {
     }
     return posixAbs.replace(/^[A-Za-z]:/, "").replace(/^\//, "");
 }
-export function buildAdvisoryText(anchors, config) {
-    const shown = anchors.slice(0, config.hook.maxClaimsInContext);
-    const lines = shown.map((a) => {
-        const target = `${a.target.path}${a.target.symbol ? `#${a.target.symbol}` : ""}`;
-        const claimText = a.claim ? `"${a.claim.excerpt}"` : "(whole-file binding, no inline claim)";
-        return `- ${a.doc ?? "(lockfile-only)"} asserts ${claimText} about ${target} [tiers: ${a.tiers.join(",")}]`;
-    });
-    const more = anchors.length > shown.length ? `\n…and ${anchors.length - shown.length} more.` : "";
-    return [
-        `lockwire: documentation makes claims about this code:`,
-        ...lines,
-        more,
-        `If this edit changes what any of these claims assert, update the doc and run \`lockwire link <doc>\`.`,
-    ]
-        .filter(Boolean)
-        .join("\n");
+export function buildAdvisoryText(anchors, config, unlinked = []) {
+    const cap = config.hook.maxClaimsInContext;
+    const sections = [];
+    if (anchors.length > 0) {
+        const shown = anchors.slice(0, cap);
+        const lines = shown.map((a) => {
+            const target = `${a.target.path}${a.target.symbol ? `#${a.target.symbol}` : ""}`;
+            const claimText = a.claim ? `"${a.claim.excerpt}"` : "(whole-file binding, no inline claim)";
+            return `- ${a.doc ?? "(lockfile-only)"} asserts ${claimText} about ${target} [tiers: ${a.tiers.join(",")}]`;
+        });
+        const more = anchors.length > shown.length ? `\n…and ${anchors.length - shown.length} more.` : "";
+        sections.push([
+            `lockwire: documentation makes claims about this code:`,
+            ...lines,
+            more,
+            `If this edit changes what any of these claims assert, update the doc and run \`lockwire link <doc>\`.`,
+        ]
+            .filter(Boolean)
+            .join("\n"));
+    }
+    if (unlinked.length > 0) {
+        const shown = unlinked.slice(0, cap);
+        const lines = shown.map((u) => `- ${u.doc}:${u.line} asserts "${u.excerpt}" about ${u.target} (${u.reason})`);
+        const more = unlinked.length > shown.length ? `\n…and ${unlinked.length - shown.length} more.` : "";
+        const docs = [...new Set(shown.map((u) => u.doc))];
+        sections.push([
+            `lockwire: these docs also make claims about this code that nobody has linked, so nothing is checking them:`,
+            ...lines,
+            more,
+            `Treat them as real claims. Run \`lockwire link ${docs.length === 1 ? docs[0] : "<doc>"}\` so lockwire checks them.`,
+        ]
+            .filter(Boolean)
+            .join("\n"));
+    }
+    return sections.join("\n\n");
+}
+/** How long the PreToolUse hook may spend looking for unlinked claims before giving up on them. */
+export const UNLINKED_SCAN_BUDGET_MS = 750;
+/**
+ * Claims in the docs about the file about to be edited that no anchor backs. Never throws and never
+ * blocks the edit: the anchored claims are the hook's job, this is a courtesy on top, so any failure
+ * or a blown time budget just means it's left out (and noted in `.lockwire/hook.log`).
+ */
+export async function unlinkedClaimsFor(repoRoot, config, touchedPath, adapter, budgetMs = UNLINKED_SCAN_BUDGET_MS) {
+    if (!config.hook.unlinkedClaims)
+        return [];
+    try {
+        const { claims, complete } = await unlinkedForWithin(repoRoot, config, touchedPath, undefined, budgetMs);
+        if (!complete)
+            await logHookError(repoRoot, adapter, `unlinked-claims scan hit its ${budgetMs}ms budget before finishing; showing what was found. Set hook.unlinkedClaims to false in .lockwire/config.json to stop scanning.`);
+        return claims;
+    }
+    catch (err) {
+        await logHookError(repoRoot, adapter, err);
+        return [];
+    }
 }
 export async function claimsForPath(repoRoot, touchedPath) {
     return refs(repoRoot, touchedPath);

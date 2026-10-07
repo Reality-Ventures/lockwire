@@ -135,7 +135,7 @@ describe("config.json", () => {
       "utf8",
     );
     const config = await readConfig(dir);
-    expect(config.hook).toEqual({ mode: "ask", maxClaimsInContext: 8 });
+    expect(config.hook).toEqual({ mode: "ask", maxClaimsInContext: 8, unlinkedClaims: true });
     expect(config).not.toHaveProperty("noiseBudget");
   });
 

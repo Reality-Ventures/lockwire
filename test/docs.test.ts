@@ -227,25 +227,49 @@ describe.skipIf(!has)("JSON samples have the shape the code emits", () => {
   });
 
   it("docs/agents.md's hook payloads are exactly what the hooks print for the README's example", async () => {
-    const blocks = fencedBlocks(read("docs/agents.md")).filter((b) => b.body.join("\n").includes("hookSpecificOutput"));
-    expect(blocks).toHaveLength(2);
-    const claim = readme.find((x) => x.lang === "markdown" && x.body.join("\n").includes("sig -->") && !x.body.join("\n").includes("id="));
-    const dir = await scratch({ "src/auth/session.ts": SESSION_V1, "CLAUDE.md": `# Auth\n\n${claim?.body.join("\n")}\n` });
+    const blocks = fencedBlocks(read("docs/agents.md")).filter((b) =>
+      b.body.join("\n").includes("hookSpecificOutput"),
+    );
+    expect(blocks, "agents.md should show Pre (anchored), Pre (unlinked) and Post payloads").toHaveLength(3);
+    const parse = (b: Block | undefined) => JSON.parse(b?.body.join("\n") ?? "{}");
+    const claim = readme.find(
+      (x) =>
+        x.lang === "markdown" &&
+        x.body.join("\n").includes("sig -->") &&
+        !x.body.join("\n").includes("id="),
+    );
+    const dir = await scratch({
+      "src/auth/session.ts": SESSION_V1,
+      "CLAUDE.md": `# Auth\n\n${claim?.body.join("\n")}\n`,
+    });
     cli(dir, ["link", "CLAUDE.md"]);
-    const payload = JSON.stringify({ tool_name: "Edit", tool_input: { file_path: join(dir, "src/auth/session.ts") }, cwd: dir });
+    const payload = (d: string) =>
+      JSON.stringify({ tool_name: "Edit", tool_input: { file_path: join(d, "src/auth/session.ts") }, cwd: d });
 
-    const pre = cli(dir, ["hook", "claude-pre"], payload).out;
+    const pre = cli(dir, ["hook", "claude-pre"], payload(dir)).out;
     expect(
       JSON.parse(pre),
       `docs/agents.md:${blocks[0]?.line} PreToolUse sample differs from the real hook output`,
-    ).toEqual(JSON.parse(blocks[0]?.body.join("\n") ?? "{}"));
+    ).toEqual(parse(blocks[0]));
+
+    // The unlinked-claims sample: a doc with a marker nobody has linked, and nothing else.
+    const lone = await scratch({
+      "src/auth/session.ts": SESSION_V1,
+      "NOTES.md":
+        "# Notes\n\n<!-- lockwire src/auth/session.ts#createSession sig -->\n`createSession` is only ever called with a valid `UserId`.\n",
+    });
+    cli(lone, ["init"]);
+    expect(
+      JSON.parse(cli(lone, ["hook", "claude-pre"], payload(lone)).out),
+      `docs/agents.md:${blocks[1]?.line} unlinked-claims sample differs from the real hook output`,
+    ).toEqual(parse(blocks[1]));
 
     await writeFile(join(dir, "src/auth/session.ts"), SESSION_NEW_SIG, "utf8");
-    const post = cli(dir, ["hook", "claude-post"], payload).out;
+    const post = cli(dir, ["hook", "claude-post"], payload(dir)).out;
     expect(
       JSON.parse(post),
-      `docs/agents.md:${blocks[1]?.line} PostToolUse sample differs from the real hook output`,
-    ).toEqual(JSON.parse(blocks[1]?.body.join("\n") ?? "{}"));
+      `docs/agents.md:${blocks[2]?.line} PostToolUse sample differs from the real hook output`,
+    ).toEqual(parse(blocks[2]));
   });
 });
 

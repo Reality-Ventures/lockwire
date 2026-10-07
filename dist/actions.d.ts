@@ -89,6 +89,15 @@ export declare function markerReader(repoRoot: string): (doc: string) => Promise
 export declare function findUnlinkedMarkers(lockfile: Lockfile, docs: readonly string[], readMarkers: (doc: string) => Promise<DocMarker[] | null>): Promise<UnlinkedMarker[]>;
 /** Claims written in the docs about this file (or symbol) that no anchor backs. */
 export declare function unlinkedFor(repoRoot: string, config: LockwireConfig, path: string, symbol?: string): Promise<UnlinkedMarker[]>;
+/**
+ * {@link unlinkedFor} with a time budget (ms) for callers on a latency budget, like the PreToolUse
+ * hook. `complete` is false when the budget ran out before every doc was read, in which case
+ * `claims` is what was found so far.
+ */
+export declare function unlinkedForWithin(repoRoot: string, config: LockwireConfig, path: string, symbol: string | undefined, budgetMs: number): Promise<{
+    claims: UnlinkedMarker[];
+    complete: boolean;
+}>;
 export declare function check(repoRoot: string, config: LockwireConfig, onlyPaths?: readonly string[], opts?: {
     write?: boolean;
     actor?: Actor;

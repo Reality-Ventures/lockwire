@@ -1,3 +1,10 @@
+export interface WalkResult {
+    files: string[];
+    /** False when the walk stopped at its deadline, so `files` is only part of the tree. */
+    complete: boolean;
+}
+/** Like {@link walkFiles}, but stops at `deadline` (a `Date.now()` timestamp) and says so. */
+export declare function walkFilesWithin(repoRoot: string, exclude: readonly string[], deadline: number): WalkResult;
 /** Recursively lists repo-relative, posix paths, skipping `.git`/`node_modules`/`.lockwire` and anything matching `exclude`. */
 export declare function walkFiles(repoRoot: string, exclude?: readonly string[]): string[];
 /** Windows editors (and PowerShell's `Out-File`) prepend a UTF-8 BOM that `JSON.parse` rejects. */
@@ -15,10 +22,6 @@ export declare function toRepoPath(repoRoot: string, input: string, cwd?: string
 export declare function tryFindRepoRoot(startDir: string): string | undefined;
 /** The nearest `lockwire.lock`/`.git` ancestor of `startDir`, or `startDir` itself. */
 export declare function findRepoRoot(startDir: string): string;
-/**
- * A small, dependency-free glob matcher: `**` matches across path separators, `*` matches within
- * one segment. Enough for `config.docs`/`config.exclude` defaults; not a full minimatch replacement.
- */
 export declare function globToRegExp(glob: string): RegExp;
 export declare function matchesAny(path: string, globs: readonly string[]): boolean;
 /**
