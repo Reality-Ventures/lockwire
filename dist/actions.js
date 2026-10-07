@@ -1,13 +1,14 @@
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { headCommit } from "./changed.js";
+import { loadDocIndex } from "./docindex.js";
 import { computeWholeFileTiers, extractFileSymbols, fileExportsFingerprint } from "./extract.js";
 import { langForPath, parserFor } from "./grammar.js";
 import { fingerprint, fingerprintSet } from "./hash.js";
 import { appendEvent, historyFor, readLedger } from "./ledger.js";
 import { anchorsForPath, lockfilePath, newAnchorId, readLockfile, removeAnchor, upsertAnchor, writeLockfile, } from "./lockfile.js";
 import { claimUnchanged, retargetMarkerLine, scanMarkers, stampMarkerLine, } from "./markers.js";
-import { globToRegExp, matchesAny, toRepoRelative, walkFiles, walkFilesWithin } from "./repo.js";
+import { globToRegExp, isScannedDoc, matchesAny, toRepoRelative, walkFiles, walkFilesWithin, } from "./repo.js";
 import { ALL_TIERS } from "./types.js";
 /** Recomputes all four tier fingerprints for a target, or reports it unresolved (file/symbol not found). */
 export async function resolveTarget(repoRoot, target, config) {
@@ -250,12 +251,6 @@ export async function linkLockfileOnly(repoRoot, docPath, target, tiers, config,
     });
     return anchor;
 }
-/** Whether `path` is a doc the config selects for scanning (`docs`, minus `exclude`, never vendored dirs). */
-export function isScannedDoc(path, config) {
-    return (matchesAny(path, config.docs) &&
-        !matchesAny(path, config.exclude) &&
-        !path.split("/").some((seg) => seg === ".git" || seg === "node_modules" || seg === ".lockwire"));
-}
 /** A cached reader of a doc's markers, or null when the doc doesn't exist. */
 export function markerReader(repoRoot) {
     const cache = new Map();
@@ -308,34 +303,36 @@ export async function findUnlinkedMarkers(lockfile, docs, readMarkers) {
     return unlinked;
 }
 const claimsAbout = (u, path, symbol) => symbol ? u.target === `${path}#${symbol}` : u.target === path || u.target.startsWith(`${path}#`);
-/** Claims written in the docs about this file (or symbol) that no anchor backs. */
+/**
+ * Claims written in the docs about this file (or symbol) that no anchor backs. Read-only: it uses an
+ * existing doc index if there is one but never writes it (the MCP tool built on this is annotated
+ * read-only).
+ */
 export async function unlinkedFor(repoRoot, config, path, symbol) {
-    return (await unlinkedForWithin(repoRoot, config, path, symbol, Number.POSITIVE_INFINITY)).claims;
+    return (await unlinkedForWithin(repoRoot, config, path, symbol, Number.POSITIVE_INFINITY, {
+        persist: false,
+    })).claims;
 }
 /**
- * {@link unlinkedFor} with a time budget (ms) for callers on a latency budget, like the PreToolUse
- * hook. `complete` is false when the budget ran out before every doc was read, in which case
- * `claims` is what was found so far.
+ * {@link unlinkedFor} for callers on a latency budget (the PreToolUse hook), backed by the doc index
+ * (see docindex.ts) so it doesn't walk the tree or read every doc each time. `complete` is false when
+ * the budget ran out first, in which case `claims` is what was found so far.
  */
-export async function unlinkedForWithin(repoRoot, config, path, symbol, budgetMs) {
-    const deadline = Date.now() + budgetMs;
+export async function unlinkedForWithin(repoRoot, config, path, symbol, budgetMs, opts = {}) {
     const lockfile = await readLockfile(repoRoot);
-    const walked = walkFilesWithin(repoRoot, config.exclude, deadline);
-    const readMarkers = markerReader(repoRoot);
-    let complete = walked.complete;
-    // Only the docs with a marker about this code matter; find them, then classify just those.
-    const relevant = [];
-    for (const doc of walked.files.filter((p) => isScannedDoc(p, config))) {
-        if (Date.now() > deadline) {
-            complete = false;
-            break;
-        }
-        const markers = await readMarkers(doc);
-        if (markers?.some((m) => m.target.path === path && (!symbol || m.target.symbol === symbol)))
-            relevant.push(doc);
-    }
+    const index = await loadDocIndex(repoRoot, config, { budgetMs, ...opts });
+    const direct = markerReader(repoRoot);
+    // Docs the config doesn't select (an anchor can live in one) aren't indexed: read those directly.
+    const readMarkers = async (doc) => index.markersOf(doc) ?? direct(doc);
+    const relevant = index.docs.filter((d) => index
+        .markersOf(d)
+        ?.some((m) => m.target.path === path && (!symbol || m.target.symbol === symbol)));
     const all = await findUnlinkedMarkers(lockfile, relevant, readMarkers);
-    return { claims: all.filter((u) => claimsAbout(u, path, symbol)), complete };
+    return {
+        claims: all.filter((u) => claimsAbout(u, path, symbol)),
+        complete: index.complete,
+        index: index.stats,
+    };
 }
 export async function check(repoRoot, config, onlyPaths, opts = {}) {
     // `write: false` is a dry run: same results, but nothing is persisted (CI and pre-commit gates

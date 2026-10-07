@@ -1,3 +1,8 @@
+import type { LockwireConfig } from "./types.js";
+/** Whether a directory entry is skipped by every tree walk: vendored/internal dirs, and anything `exclude` matches. */
+export declare function isSkippedEntry(name: string, rel: string, exclude: readonly string[]): boolean;
+/** Whether `path` is a doc the config selects for scanning (`docs`, minus `exclude`, never vendored dirs). */
+export declare function isScannedDoc(path: string, config: LockwireConfig): boolean;
 export interface WalkResult {
     files: string[];
     /** False when the walk stopped at its deadline, so `files` is only part of the tree. */

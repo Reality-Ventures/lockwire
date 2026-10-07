@@ -1,6 +1,16 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 const ALWAYS_SKIP = new Set([".git", "node_modules", ".lockwire"]);
+/** Whether a directory entry is skipped by every tree walk: vendored/internal dirs, and anything `exclude` matches. */
+export function isSkippedEntry(name, rel, exclude) {
+    return ALWAYS_SKIP.has(name) || matchesAny(rel, exclude);
+}
+/** Whether `path` is a doc the config selects for scanning (`docs`, minus `exclude`, never vendored dirs). */
+export function isScannedDoc(path, config) {
+    return (matchesAny(path, config.docs) &&
+        !matchesAny(path, config.exclude) &&
+        !path.split("/").some((seg) => ALWAYS_SKIP.has(seg)));
+}
 /** Like {@link walkFiles}, but stops at `deadline` (a `Date.now()` timestamp) and says so. */
 export function walkFilesWithin(repoRoot, exclude, deadline) {
     const files = [];
@@ -13,11 +23,9 @@ export function walkFilesWithin(repoRoot, exclude, deadline) {
             return;
         }
         for (const entry of readdirSync(dir, { withFileTypes: true })) {
-            if (ALWAYS_SKIP.has(entry.name))
-                continue;
             const abs = join(dir, entry.name);
             const rel = toRepoRelative(repoRoot, abs);
-            if (matchesAny(rel, exclude))
+            if (isSkippedEntry(entry.name, rel, exclude))
                 continue;
             if (entry.isDirectory())
                 walk(abs);

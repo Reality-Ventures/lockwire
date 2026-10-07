@@ -191,9 +191,10 @@ describe("the scan can't hurt the edit it's advising", () => {
   });
 
   const canChmod = process.platform !== "win32" && process.getuid?.() !== 0;
-  it.skipIf(!canChmod)("an unreadable doc fails open: the anchored claims still come through, the error is logged", async () => {
+  it.skipIf(!canChmod)("an unreadable doc is skipped, not fatal: everything else still comes through", async () => {
     const dir = await repo({
       "CLAUDE.md": doc("src/a.ts#alpha", "alpha adds one."),
+      "NOTES.md": doc("src/a.ts#alpha", "a claim in a readable doc."),
       "locked.md": doc("src/a.ts#alpha", "can't be read."),
     });
     await linkDoc(dir, "CLAUDE.md", DEFAULT_CONFIG, { type: "human" });
@@ -201,8 +202,9 @@ describe("the scan can't hurt the edit it's advising", () => {
     try {
       const r = hook(dir, "claude-pre");
       expect(r.status).toBe(0);
-      expect(r.text).toContain("CLAUDE.md asserts");
-      expect(await readFile(join(dir, ".lockwire", "hook.log"), "utf8")).toMatch(/EACCES|permission/i);
+      expect(r.text).toContain("CLAUDE.md asserts"); // anchored claims
+      expect(r.text).toContain("NOTES.md:3 asserts"); // the readable unlinked claim
+      expect(r.text).not.toContain("locked.md");
     } finally {
       chmodSync(join(dir, "locked.md"), 0o644);
     }

@@ -17,6 +17,7 @@ import {
 import { cliActor } from "./actor.js";
 import { changedFiles } from "./changed.js";
 import { readConfig, writeConfig } from "./config.js";
+import { ensureLockwireGitignore, indexPath, loadDocIndex } from "./docindex.js";
 import { formatGithub, formatJson, formatText } from "./format.js";
 import { runClaudeHook } from "./hook-claude.js";
 import { runCodexHook } from "./hook-codex.js";
@@ -35,6 +36,7 @@ const BOOLEAN_FLAGS = new Set([
   "reviewed",
   "json",
   "fail-on-unlinked",
+  "rebuild",
 ]);
 
 function parseFlags(args: string[]): {
@@ -81,6 +83,7 @@ async function main() {
       if (!existsSync(`${repoRoot}/lockwire.lock`))
         await writeLockfile(repoRoot, { version: 1, anchors: [] });
       await mkdir(`${repoRoot}/.lockwire`, { recursive: true });
+      await ensureLockwireGitignore(repoRoot);
       const gitattrPath = `${repoRoot}/.gitattributes`;
       const line = ".lockwire/ledger.jsonl merge=union\n";
       if (existsSync(gitattrPath)) {
@@ -299,6 +302,25 @@ async function main() {
       break;
     }
 
+    case "index": {
+      // Build or refresh the doc index the PreToolUse hook uses to find unlinked claims quickly.
+      const config = await readConfig(repoRoot);
+      const index = await loadDocIndex(repoRoot, config, { rebuild: Boolean(flags.rebuild) });
+      const markers = index.docs.reduce((n, d) => n + (index.markersOf(d)?.length ?? 0), 0);
+      const { stats } = index;
+      console.log(
+        `indexed ${index.docs.length} doc${index.docs.length === 1 ? "" : "s"} (${markers} marker${markers === 1 ? "" : "s"}) → ${indexPath(repoRoot).slice(repoRoot.length + 1)}`,
+      );
+      console.log(
+        stats.rebuilt
+          ? `built from scratch: read ${stats.docsRead} docs`
+          : `refreshed: re-read ${stats.docsRead} doc${stats.docsRead === 1 ? "" : "s"}, re-listed ${stats.dirsRescanned} director${stats.dirsRescanned === 1 ? "y" : "ies"}`,
+      );
+      if (!stats.rebuilt && stats.docsRead === 0 && stats.dirsRescanned === 0)
+        console.log("already up to date");
+      break;
+    }
+
     case "mcp": {
       const { startMcpServer } = await import("./mcp-server.js");
       await startMcpServer(repoRoot);
@@ -308,7 +330,7 @@ async function main() {
     default:
       console.log("lockwire — bind documentation claims to code fingerprints\n");
       console.log(
-        "commands: init, link, check, status, refs, history, ack, waive, unlink, ledger verify, hook, mcp",
+        "commands: init, link, check, status, refs, history, ack, waive, unlink, ledger verify, index, hook, mcp",
       );
       process.exitCode = cmd ? 1 : 0;
   }

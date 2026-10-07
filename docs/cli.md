@@ -4,7 +4,7 @@ Every command resolves the repo root by walking up from the current directory to
 
 ## `lockwire init`
 
-Creates `lockwire.lock` (empty), `.lockwire/config.json` (defaults), and appends `.lockwire/ledger.jsonl merge=union` to `.gitattributes` (creating it if needed). Safe to re-run — it never overwrites an existing lockfile.
+Creates `lockwire.lock` (empty), `.lockwire/config.json` (defaults), `.lockwire/.gitignore` (so the hook's cache and `hook.log` are never committed), and appends `.lockwire/ledger.jsonl merge=union` to `.gitattributes` (creating it if needed). Safe to re-run — it never overwrites an existing lockfile.
 
 ```bash
 lockwire init
@@ -118,7 +118,7 @@ single-hash would flag 3 · lockwire flagged 1 · noise −66.7%
 | `normalizeLocals` | `true` | Alias local variables in the `body` fingerprint, so renaming a local isn't drift. Changing it changes every `body` fingerprint, so re-link afterwards. |
 | `hook.mode` | `"advisory"` | What the `PreToolUse` hook does: `advisory`, `ask` or `deny` — see [agents.md](agents.md#hook-modes). |
 | `hook.maxClaimsInContext` | `8` | The most claims the hooks inject for one edit; the rest are summarised as "…and N more". |
-| `hook.unlinkedClaims` | `true` | Whether the `PreToolUse` hook also tells the agent about claims in the docs about the file it's editing that nobody has linked. It scans the docs on every edit, within a 750 ms budget; set `false` in a very large repo if you'd rather not pay for that. |
+| `hook.unlinkedClaims` | `true` | Whether the `PreToolUse` hook also tells the agent about claims in the docs about the file it's editing that nobody has linked. It reads a cached [doc index](#lockwire-index---rebuild) kept fresh by `stat`ing the docs, within a 750 ms budget; set `false` to switch it off entirely. |
 
 ## `lockwire status [--scope <glob>] [--json]`
 
@@ -158,6 +158,18 @@ A time-boxed, logged waiver — sets status to `waived` and logs `waiver.granted
 ```bash
 lockwire waive k7q2m9xv --reason "signature change ships with the v2 API next sprint" --expires 2026-10-15
 ```
+
+## `lockwire index [--rebuild]`
+
+Builds or refreshes the doc index (`.lockwire/cache/doc-index.json`): which docs hold markers, and what they say. The `PreToolUse` hook uses it to find unlinked claims about the file being edited without walking the tree, and keeps it fresh itself — you only run this to pre-build it in a very large repo (where a first hook run could exceed its time budget), or with `--rebuild` to start over. It prints what it did:
+
+```bash
+$ lockwire index
+indexed 600 docs (60 markers) → .lockwire/cache/doc-index.json
+built from scratch: read 600 docs
+```
+
+The index is derived and machine-local: `lockwire init` writes `.lockwire/.gitignore` so it, and `hook.log`, are never committed. `lockwire check` doesn't use it — a full check always reads the docs, so it stays authoritative.
 
 ## `lockwire unlink <id>`
 

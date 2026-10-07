@@ -1,7 +1,22 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import type { LockwireConfig } from "./types.js";
 
 const ALWAYS_SKIP = new Set([".git", "node_modules", ".lockwire"]);
+
+/** Whether a directory entry is skipped by every tree walk: vendored/internal dirs, and anything `exclude` matches. */
+export function isSkippedEntry(name: string, rel: string, exclude: readonly string[]): boolean {
+  return ALWAYS_SKIP.has(name) || matchesAny(rel, exclude);
+}
+
+/** Whether `path` is a doc the config selects for scanning (`docs`, minus `exclude`, never vendored dirs). */
+export function isScannedDoc(path: string, config: LockwireConfig): boolean {
+  return (
+    matchesAny(path, config.docs) &&
+    !matchesAny(path, config.exclude) &&
+    !path.split("/").some((seg) => ALWAYS_SKIP.has(seg))
+  );
+}
 
 export interface WalkResult {
   files: string[];
@@ -24,10 +39,9 @@ export function walkFilesWithin(
       return;
     }
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (ALWAYS_SKIP.has(entry.name)) continue;
       const abs = join(dir, entry.name);
       const rel = toRepoRelative(repoRoot, abs);
-      if (matchesAny(rel, exclude)) continue;
+      if (isSkippedEntry(entry.name, rel, exclude)) continue;
       if (entry.isDirectory()) walk(abs);
       else files.push(rel);
     }

@@ -34,7 +34,9 @@ If other docs make claims about the file that nobody has linked — a marker wit
 }
 ```
 
-These are advisory in every mode: only anchored claims can be acknowledged, so only they can make `ask` or `deny` prompt or block. Finding them means reading the docs on each edit, so the scan has a 750 ms budget; if it runs out the hook shows the anchored claims alone and notes it in `.lockwire/hook.log`. Turn it off with `hook.unlinkedClaims: false`.
+These are advisory in every mode: only anchored claims can be acknowledged, so only they can make `ask` or `deny` prompt or block. Finding them used to mean walking the tree and reading every doc on each edit. The hook now keeps a **doc index** in `.lockwire/cache/doc-index.json` (git-ignored; `init` writes `.lockwire/.gitignore`). Each edit validates it with a `stat` of every recorded directory and doc — no walk, no reads — and re-lists or re-reads only what moved: in a repo of 20,600 files and 600 docs that is about 5 ms, and the hook costs the same as with the scan off. The scan keeps a 750 ms budget as a backstop; if a cold build in a huge repo runs out of it, the hook shows the anchored claims alone, notes it in `.lockwire/hook.log`, and `lockwire index` builds the index once without a budget. Turn the whole thing off with `hook.unlinkedClaims: false`.
+
+The index fails towards re-reading. Entries modified within 2 s of the index being written are re-checked every time; a changed `docs`/`exclude` config, a corrupt file or an index older than a day is rebuilt from scratch; a build that ran out of budget is never saved. The one thing it can't see is a doc whose content changes while its size *and* modification time stay exactly the same (a deliberate `touch -r`-style restore), the same limit `make` and git's own index have — `lockwire index --rebuild` fixes it, and so does the daily rebuild. The read-only MCP tools use an existing index but never write one.
 
 **`PostToolUse`** (after the edit lands): re-fingerprints the touched file, diffs against the stored anchors, and — if any bound tier moved — reports it:
 

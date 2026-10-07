@@ -126,7 +126,7 @@ export async function unlinkedClaimsFor(
       await logHookError(
         repoRoot,
         adapter,
-        `unlinked-claims scan hit its ${budgetMs}ms budget before finishing; showing what was found. Set hook.unlinkedClaims to false in .lockwire/config.json to stop scanning.`,
+        `unlinked-claims scan hit its ${budgetMs}ms budget before finishing; showing what was found. Run \`lockwire index\` once to build the doc index so later edits are fast, or set hook.unlinkedClaims to false in .lockwire/config.json to stop scanning.`,
       );
     return claims;
   } catch (err) {

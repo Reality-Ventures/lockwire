@@ -1,3 +1,4 @@
+import { type IndexStats } from "./docindex.js";
 import { type DocMarker } from "./markers.js";
 import type { Actor, Anchor, FileSymbols, Fingerprints, Lockfile, LockwireConfig, Tier } from "./types.js";
 export interface TargetResolution {
@@ -77,26 +78,33 @@ export interface CheckResult {
     results: AnchorCheckResult[];
     unlinked: UnlinkedMarker[];
 }
-/** Whether `path` is a doc the config selects for scanning (`docs`, minus `exclude`, never vendored dirs). */
-export declare function isScannedDoc(path: string, config: LockwireConfig): boolean;
 /** A cached reader of a doc's markers, or null when the doc doesn't exist. */
 export declare function markerReader(repoRoot: string): (doc: string) => Promise<DocMarker[] | null>;
+/** The part of a marker needed to classify it and show its claim; DocMarker and the doc index both have it. */
+export type MarkerView = Pick<DocMarker, "id" | "target" | "line" | "claimExcerpt">;
 /**
  * Markers in `docs` that no anchor in `lockfile` backs: no `id=` yet, an id that matches no anchor, an
  * id that belongs to the marker in another doc (a copy-paste), or one used twice in a doc. Until
  * `lockwire link` runs, such a claim isn't being checked at all.
  */
-export declare function findUnlinkedMarkers(lockfile: Lockfile, docs: readonly string[], readMarkers: (doc: string) => Promise<DocMarker[] | null>): Promise<UnlinkedMarker[]>;
-/** Claims written in the docs about this file (or symbol) that no anchor backs. */
+export declare function findUnlinkedMarkers(lockfile: Lockfile, docs: readonly string[], readMarkers: (doc: string) => Promise<readonly MarkerView[] | null>): Promise<UnlinkedMarker[]>;
+/**
+ * Claims written in the docs about this file (or symbol) that no anchor backs. Read-only: it uses an
+ * existing doc index if there is one but never writes it (the MCP tool built on this is annotated
+ * read-only).
+ */
 export declare function unlinkedFor(repoRoot: string, config: LockwireConfig, path: string, symbol?: string): Promise<UnlinkedMarker[]>;
 /**
- * {@link unlinkedFor} with a time budget (ms) for callers on a latency budget, like the PreToolUse
- * hook. `complete` is false when the budget ran out before every doc was read, in which case
- * `claims` is what was found so far.
+ * {@link unlinkedFor} for callers on a latency budget (the PreToolUse hook), backed by the doc index
+ * (see docindex.ts) so it doesn't walk the tree or read every doc each time. `complete` is false when
+ * the budget ran out first, in which case `claims` is what was found so far.
  */
-export declare function unlinkedForWithin(repoRoot: string, config: LockwireConfig, path: string, symbol: string | undefined, budgetMs: number): Promise<{
+export declare function unlinkedForWithin(repoRoot: string, config: LockwireConfig, path: string, symbol: string | undefined, budgetMs: number, opts?: {
+    persist?: boolean;
+}): Promise<{
     claims: UnlinkedMarker[];
     complete: boolean;
+    index: IndexStats;
 }>;
 export declare function check(repoRoot: string, config: LockwireConfig, onlyPaths?: readonly string[], opts?: {
     write?: boolean;
