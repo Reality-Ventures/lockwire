@@ -125,14 +125,37 @@ export async function linkDoc(
   let current = lockfile;
 
   for (const marker of markers) {
-    const existing = marker.id ? current.anchors.find((a) => a.id === marker.id) : undefined;
+    const targetLabel = `${marker.target.path}${marker.target.symbol ? `#${marker.target.symbol}` : ""}`;
+    let existing = marker.id ? current.anchors.find((a) => a.id === marker.id) : undefined;
 
-    const resolved = await resolveTarget(repoRoot, marker.target, config);
-    if (!resolved || !resolved.found) {
+    // A marker copy-pasted into another doc carries the original's id. If the original doc still
+    // holds that marker, this is a second claim, not the same one moved -- binding it to the
+    // existing anchor would silently stop checking the original sentence.
+    let copiedId = false;
+    if (existing?.doc && existing.doc !== docPath) {
+      const originalPath = `${repoRoot}/${existing.doc}`;
+      const stillThere =
+        existsSync(originalPath) &&
+        scanMarkers(await readFile(originalPath, "utf8")).some((m) => m.id === existing?.id);
+      if (stillThere) {
+        copiedId = true;
+        existing = undefined;
+      }
+    }
+
+    // One unsupported or unparseable target must not stop the rest of the doc from linking.
+    let resolved: TargetResolution | null;
+    try {
+      resolved = await resolveTarget(repoRoot, marker.target, config);
+    } catch (err) {
       result.skipped.push({
-        reason: "target not found",
-        target: `${marker.target.path}${marker.target.symbol ? `#${marker.target.symbol}` : ""}`,
+        reason: err instanceof Error ? err.message : String(err),
+        target: targetLabel,
       });
+      continue;
+    }
+    if (!resolved || !resolved.found) {
+      result.skipped.push({ reason: "target not found", target: targetLabel });
       continue;
     }
 
@@ -151,7 +174,8 @@ export async function linkDoc(
 
     const tiers =
       marker.tiers ?? (marker.target.symbol ? (["sig"] as Tier[]) : (["path", "body"] as Tier[]));
-    const id = marker.id ?? newAnchorId();
+    const isNew = !marker.id || copiedId;
+    const id = isNew || !marker.id ? newAnchorId() : marker.id;
     const anchor: Anchor = {
       id,
       doc: docPath,
@@ -170,7 +194,7 @@ export async function linkDoc(
     };
     current = upsertAnchor(current, anchor);
 
-    if (!marker.id) {
+    if (isNew) {
       const lineIdx = marker.line - 1;
       const original = lines[lineIdx];
       if (original !== undefined) {
@@ -292,7 +316,9 @@ export async function check(
     }
 
     if (anchor.status === "waived" && anchor.waiver) {
-      if (anchor.waiver.expires < now) {
+      // Fail closed: an expiry that doesn't parse (hand-edited lock, older version) counts as expired.
+      const expiresAt = Date.parse(anchor.waiver.expires);
+      if (Number.isNaN(expiresAt) || expiresAt < Date.parse(now)) {
         await appendEvent(repoRoot, {
           ts: now,
           event: "waiver.expired",
@@ -396,12 +422,29 @@ export async function check(
           { path: anchor.target.path, symbol: relocatedTo },
           config,
         );
-        const relocated: Anchor = {
-          ...anchor,
-          target: { path: anchor.target.path, symbol: relocatedTo },
-          fingerprints: reResolved?.fingerprints ?? anchor.fingerprints,
-          status: "fresh",
-        };
+        const target = { path: anchor.target.path, symbol: relocatedTo };
+        // A rename must not launder other changes: `sig` is expected to differ (it carries the
+        // name, and the candidate already matched on it), but any other bound tier that moved is
+        // real drift. Re-stamp only `sig` in that case so the drift stays visible on later checks.
+        const movedTiers = reResolved
+          ? anchor.tiers.filter(
+              (t) => t !== "sig" && reResolved.fingerprints[t] !== anchor.fingerprints[t],
+            )
+          : [];
+        const relocated: Anchor =
+          movedTiers.length > 0 && reResolved
+            ? {
+                ...anchor,
+                target,
+                fingerprints: { ...anchor.fingerprints, sig: reResolved.fingerprints.sig },
+                status: "drifted",
+              }
+            : {
+                ...anchor,
+                target,
+                fingerprints: reResolved?.fingerprints ?? anchor.fingerprints,
+                status: "fresh",
+              };
         current = upsertAnchor(current, relocated);
         await appendEvent(repoRoot, {
           ts: now,
@@ -411,10 +454,22 @@ export async function check(
           commit: null,
           note: `${anchor.target.symbol} -> ${relocatedTo}`,
         });
+        for (const tier of movedTiers) {
+          await appendEvent(repoRoot, {
+            ts: now,
+            event: "anchor.drifted",
+            anchor: anchor.id,
+            actor: { type: "unknown" },
+            commit: null,
+            tier,
+            from: anchor.fingerprints[tier],
+            to: reResolved?.fingerprints[tier] ?? "",
+          });
+        }
         results.push({
           anchor: relocated,
-          status: "fresh",
-          driftedTiers: [],
+          status: relocated.status,
+          driftedTiers: movedTiers,
           singleHashWouldFlag: true,
         });
       } else {
@@ -587,10 +642,20 @@ export async function waive(
   expires: string,
   actor: Actor,
 ): Promise<Anchor> {
+  const expiresAt = Date.parse(expires);
+  if (!/^\d{4}-\d{2}-\d{2}/.test(expires) || Number.isNaN(expiresAt))
+    throw new Error(
+      `invalid --expires "${expires}": use an ISO date such as 2026-12-31 (waivers must expire)`,
+    );
+  if (expiresAt <= Date.now()) throw new Error(`--expires "${expires}" is already in the past`);
   const lockfile = await readLockfile(repoRoot);
   const anchor = lockfile.anchors.find((a) => a.id === anchorId);
   if (!anchor) throw new Error(`no anchor ${anchorId}`);
-  const updated: Anchor = { ...anchor, status: "waived", waiver: { reason, expires, by: actor } };
+  const updated: Anchor = {
+    ...anchor,
+    status: "waived",
+    waiver: { reason, expires: new Date(expiresAt).toISOString(), by: actor },
+  };
   await writeLockfile(repoRoot, upsertAnchor(lockfile, updated));
   await appendEvent(repoRoot, {
     ts: new Date().toISOString(),

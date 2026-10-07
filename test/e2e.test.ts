@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { check, linkDoc } from "../src/actions.js";
+import { check, linkDoc, waive } from "../src/actions.js";
 import { DEFAULT_CONFIG } from "../src/types.js";
 
 const SESSION_TS = `export async function createSession(userId: UserId, ttl = 3600): Promise<Session> {
@@ -228,5 +228,105 @@ describe("claim-side drift", () => {
     await writeFile(join(repo, "CLAUDE.md"), doc("Changed."), "utf8");
     expect((await only(repo, ["unrelated.ts"])).claimChanged).toBeUndefined(); // out of scope: not examined
     expect((await only(repo, ["CLAUDE.md"])).claimChanged).toBe(true);
+  });
+});
+
+describe("regressions found by adversarial testing", () => {
+  const actor = { type: "human" as const };
+  const mdDoc = (marker: string, sentence = "`createSession` takes a `UserId`.") =>
+    `# Auth\n\n${marker}\n${sentence}\n`;
+
+  it("a rename combined with a change to a bound tier is reported as drift, not laundered as fresh", async () => {
+    const repo = await tempRepo();
+    await writeFile(
+      join(repo, "CLAUDE.md"),
+      mdDoc("<!-- lockwire src/session.ts#createSession sig,body -->"),
+      "utf8",
+    );
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+
+    await writeFile(
+      join(repo, "src", "session.ts"),
+      SESSION_TS.replace("createSession", "openSession").replace("mint(userId)", "forge(userId)"),
+      "utf8",
+    );
+    const first = (await check(repo, DEFAULT_CONFIG)).results[0]!;
+    expect(first.anchor.target.symbol).toBe("openSession");
+    expect(first.status).toBe("drifted");
+    expect(first.driftedTiers).toEqual(["body"]);
+
+    // ...and it stays visible on the next check instead of disappearing.
+    expect((await check(repo, DEFAULT_CONFIG)).results[0]?.status).toBe("drifted");
+  });
+
+  it("a marker copied into a second doc gets its own anchor and doesn't take over the original", async () => {
+    const repo = await tempRepo();
+    const marker = "<!-- lockwire src/session.ts#createSession sig id=ORIG0001 -->";
+    await writeFile(join(repo, "CLAUDE.md"), mdDoc(marker), "utf8");
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+
+    await mkdir(join(repo, "docs"));
+    await writeFile(join(repo, "docs", "copy.md"), mdDoc(marker), "utf8");
+    const copied = await linkDoc(repo, "docs/copy.md", DEFAULT_CONFIG, actor);
+    expect(copied.created).toBe(1);
+
+    const { results } = await check(repo, DEFAULT_CONFIG);
+    expect(results).toHaveLength(2);
+
+    // The original sentence is still being watched.
+    await writeFile(join(repo, "CLAUDE.md"), mdDoc(marker, "Something false now."), "utf8");
+    const after = (await check(repo, DEFAULT_CONFIG)).results.find((r) => r.anchor.id === "ORIG0001");
+    expect(after?.claimChanged).toBe(true);
+  });
+
+  it("moving a doc (original no longer has the marker) keeps the same anchor", async () => {
+    const repo = await tempRepo();
+    const marker = "<!-- lockwire src/session.ts#createSession sig id=ORIG0002 -->";
+    await writeFile(join(repo, "CLAUDE.md"), mdDoc(marker), "utf8");
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+
+    await rm(join(repo, "CLAUDE.md"));
+    await writeFile(join(repo, "AGENTS.md"), mdDoc(marker), "utf8");
+    const moved = await linkDoc(repo, "AGENTS.md", DEFAULT_CONFIG, actor);
+    expect(moved.refreshed).toBe(1);
+    const { results } = await check(repo, DEFAULT_CONFIG);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.anchor.doc).toBe("AGENTS.md");
+  });
+
+  it("a waiver must have a parseable, future expiry, and an unparseable stored one counts as expired", async () => {
+    const repo = await tempRepo();
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    const [anchor] = (await check(repo, DEFAULT_CONFIG)).results;
+    const id = anchor!.anchor.id;
+
+    await expect(waive(repo, id, "r", "never", actor)).rejects.toThrow(/invalid --expires/);
+    await expect(waive(repo, id, "r", "2001-01-01", actor)).rejects.toThrow(/in the past/);
+
+    const lockPath = join(repo, "lockwire.lock");
+    const lock = JSON.parse(await readFile(lockPath, "utf8"));
+    Object.assign(lock.anchors[0], {
+      status: "waived",
+      waiver: { reason: "old", expires: "never", by: actor },
+    });
+    await writeFile(lockPath, JSON.stringify(lock), "utf8");
+    expect((await check(repo, DEFAULT_CONFIG)).results[0]?.status).not.toBe("waived");
+
+    await waive(repo, id, "ok", "2999-01-01", actor);
+    expect((await check(repo, DEFAULT_CONFIG)).results[0]?.status).toBe("waived");
+  });
+
+  it("an unsupported-language target is skipped with a reason and the rest of the doc still links", async () => {
+    const repo = await tempRepo();
+    await writeFile(join(repo, "main.go"), "package main\nfunc Main() {}\n", "utf8");
+    await writeFile(
+      join(repo, "CLAUDE.md"),
+      `# D\n\n<!-- lockwire main.go#Main sig -->\ngo claim.\n\n${CLAUDE_MD.split("\n").slice(2).join("\n")}`,
+      "utf8",
+    );
+    const linkedResult = await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    expect(linkedResult.created).toBe(1);
+    expect(linkedResult.skipped).toHaveLength(1);
+    expect(linkedResult.skipped[0]?.reason).toMatch(/supports TypeScript/);
   });
 });

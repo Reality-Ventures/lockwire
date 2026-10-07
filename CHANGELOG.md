@@ -18,6 +18,10 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Fixed
 
+- A function renamed *and* changed in a bound tier (say `body`) was re-stamped as fresh, hiding the change. Relocation now re-stamps only `sig` and reports any other moved bound tier as drift.
+- A marker copy-pasted into a second doc silently took over the original's anchor, so the original sentence stopped being checked. If the original doc still holds the marker, the copy now gets its own id.
+- `waive --expires` accepted any string, and an unparseable one never expired. It now requires a real ISO date in the future, and an unparseable expiry already in a lockfile counts as expired.
+- One marker with an unsupported-language target (e.g. `main.go`) aborted the whole `link`. It is now skipped with a reason and the rest of the doc still links.
 - A bound claim could be rewritten, or its marker deleted, and `check` would report `fresh` forever, because the claim hash was stored but never compared. `check` now flags an edited sentence as `drifted (claim)` and a removed marker as `orphaned`, ignoring whitespace-only changes and leaving existing anchors unflagged. Editing a doc also triggers the check for anchors bound to it (`check <doc>` and the PostToolUse hook).
 - Same-file rename detection never fired for renamed functions or classes, because `sig` fingerprints include the name. Candidates are now compared under the old name, and symbols already bound by another anchor are skipped.
 - `lockwire check` no longer creates an empty `lockwire.lock` in a folder that has none, and the MCP tools say so instead of returning `[]` when they are rooted at such a folder.
