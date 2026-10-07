@@ -1,8 +1,9 @@
+import { existsSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { check, refs, type UnlinkedMarker, unlinkedForWithin } from "./actions.js";
 import { readConfig } from "./config.js";
-import { toPosix, toRepoRelative, tryFindRepoRoot } from "./repo.js";
+import { isLockwireRepo, toPosix, toRepoRelative, tryFindRepoRoot } from "./repo.js";
 import type { Actor, Anchor, LockwireConfig } from "./types.js";
 
 export interface HookInput {
@@ -113,7 +114,7 @@ export async function unlinkedClaimsFor(
   adapter: string,
   budgetMs: number = UNLINKED_SCAN_BUDGET_MS,
 ): Promise<UnlinkedMarker[]> {
-  if (!config.hook.unlinkedClaims) return [];
+  if (!config.hook.unlinkedClaims || !isLockwireRepo(repoRoot)) return [];
   try {
     const { claims, complete } = await unlinkedForWithin(
       repoRoot,
@@ -192,6 +193,9 @@ export async function reportDriftFor(
 
 export async function logHookError(repoRoot: string, adapter: string, err: unknown): Promise<void> {
   try {
+    // A hook runs in every repo the user edits; an error in one that never opted into lockwire must
+    // not leave a `.lockwire/` behind. (A repo with the directory already, or a lockfile, has opted in.)
+    if (!isLockwireRepo(repoRoot) && !existsSync(`${repoRoot}/.lockwire`)) return;
     await mkdir(`${repoRoot}/.lockwire`, { recursive: true });
     const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
     await appendFile(

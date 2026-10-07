@@ -24,7 +24,7 @@ import { runCodexHook } from "./hook-codex.js";
 import { readLedger, verifyLedger } from "./ledger.js";
 import { readLockfile, writeLockfile } from "./lockfile.js";
 import { scanMarkers } from "./markers.js";
-import { findRepoRoot, isPathGitignored, toRepoPath } from "./repo.js";
+import { findRepoRoot, isPathGitignored, toDisplayPath, toRepoPath } from "./repo.js";
 import type { Tier } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
 
@@ -309,7 +309,7 @@ async function main() {
       const markers = index.docs.reduce((n, d) => n + (index.markersOf(d)?.length ?? 0), 0);
       const { stats } = index;
       console.log(
-        `indexed ${index.docs.length} doc${index.docs.length === 1 ? "" : "s"} (${markers} marker${markers === 1 ? "" : "s"}) → ${indexPath(repoRoot).slice(repoRoot.length + 1)}`,
+        `indexed ${index.docs.length} doc${index.docs.length === 1 ? "" : "s"} (${markers} marker${markers === 1 ? "" : "s"}) → ${toDisplayPath(repoRoot, indexPath(repoRoot))}`,
       );
       console.log(
         stats.rebuilt

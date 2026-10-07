@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import * as nodePath from "node:path";
 import { dirname, join, relative, resolve } from "node:path";
 const ALWAYS_SKIP = new Set([".git", "node_modules", ".lockwire"]);
 /** Whether a directory entry is skipped by every tree walk: vendored/internal dirs, and anything `exclude` matches. */
@@ -40,6 +41,15 @@ export function walkFilesWithin(repoRoot, exclude, deadline) {
 export function walkFiles(repoRoot, exclude = []) {
     return walkFilesWithin(repoRoot, exclude, Number.POSITIVE_INFINITY).files;
 }
+/**
+ * Whether this repository has opted into lockwire: it has a `lockwire.lock` or a `.lockwire/config.json`.
+ * The editing hooks run in every repo the user touches, so they must be inert (no scanning, no files
+ * written) anywhere that hasn't.
+ */
+export function isLockwireRepo(repoRoot) {
+    return (existsSync(join(repoRoot, "lockwire.lock")) ||
+        existsSync(join(repoRoot, ".lockwire", "config.json")));
+}
 /** Windows editors (and PowerShell's `Out-File`) prepend a UTF-8 BOM that `JSON.parse` rejects. */
 export function stripBom(text) {
     return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
@@ -47,6 +57,13 @@ export function stripBom(text) {
 /** Windows delivers hook paths with backslashes even under Git Bash. Normalize before any comparison. */
 export function toPosix(p) {
     return p.replace(/\\/g, "/");
+}
+/**
+ * A path as shown to users: relative to the repo, forward slashes on every platform. `pathModule` is
+ * injectable so the Windows behaviour can be tested anywhere.
+ */
+export function toDisplayPath(repoRoot, absPath, pathModule = nodePath) {
+    return toPosix(pathModule.relative(repoRoot, absPath));
 }
 export function toRepoRelative(repoRoot, absPath) {
     return toPosix(relative(repoRoot, absPath));

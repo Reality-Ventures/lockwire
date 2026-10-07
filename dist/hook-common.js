@@ -1,8 +1,9 @@
+import { existsSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { check, refs, unlinkedForWithin } from "./actions.js";
 import { readConfig } from "./config.js";
-import { toPosix, toRepoRelative, tryFindRepoRoot } from "./repo.js";
+import { isLockwireRepo, toPosix, toRepoRelative, tryFindRepoRoot } from "./repo.js";
 export async function readStdinJson() {
     const chunks = [];
     for await (const chunk of process.stdin)
@@ -78,7 +79,7 @@ export const UNLINKED_SCAN_BUDGET_MS = 750;
  * or a blown time budget just means it's left out (and noted in `.lockwire/hook.log`).
  */
 export async function unlinkedClaimsFor(repoRoot, config, touchedPath, adapter, budgetMs = UNLINKED_SCAN_BUDGET_MS) {
-    if (!config.hook.unlinkedClaims)
+    if (!config.hook.unlinkedClaims || !isLockwireRepo(repoRoot))
         return [];
     try {
         const { claims, complete } = await unlinkedForWithin(repoRoot, config, touchedPath, undefined, budgetMs);
@@ -134,6 +135,10 @@ export async function reportDriftFor(repoRoot, touchedPath, actor) {
 }
 export async function logHookError(repoRoot, adapter, err) {
     try {
+        // A hook runs in every repo the user edits; an error in one that never opted into lockwire must
+        // not leave a `.lockwire/` behind. (A repo with the directory already, or a lockfile, has opted in.)
+        if (!isLockwireRepo(repoRoot) && !existsSync(`${repoRoot}/.lockwire`))
+            return;
         await mkdir(`${repoRoot}/.lockwire`, { recursive: true });
         const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
         await appendFile(`${repoRoot}/.lockwire/hook.log`, `[${new Date().toISOString()}] ${adapter}: ${msg}\n`, "utf8");

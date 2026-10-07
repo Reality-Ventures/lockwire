@@ -1,3 +1,4 @@
+import * as nodePath from "node:path";
 import type { LockwireConfig } from "./types.js";
 /** Whether a directory entry is skipped by every tree walk: vendored/internal dirs, and anything `exclude` matches. */
 export declare function isSkippedEntry(name: string, rel: string, exclude: readonly string[]): boolean;
@@ -12,10 +13,21 @@ export interface WalkResult {
 export declare function walkFilesWithin(repoRoot: string, exclude: readonly string[], deadline: number): WalkResult;
 /** Recursively lists repo-relative, posix paths, skipping `.git`/`node_modules`/`.lockwire` and anything matching `exclude`. */
 export declare function walkFiles(repoRoot: string, exclude?: readonly string[]): string[];
+/**
+ * Whether this repository has opted into lockwire: it has a `lockwire.lock` or a `.lockwire/config.json`.
+ * The editing hooks run in every repo the user touches, so they must be inert (no scanning, no files
+ * written) anywhere that hasn't.
+ */
+export declare function isLockwireRepo(repoRoot: string): boolean;
 /** Windows editors (and PowerShell's `Out-File`) prepend a UTF-8 BOM that `JSON.parse` rejects. */
 export declare function stripBom(text: string): string;
 /** Windows delivers hook paths with backslashes even under Git Bash. Normalize before any comparison. */
 export declare function toPosix(p: string): string;
+/**
+ * A path as shown to users: relative to the repo, forward slashes on every platform. `pathModule` is
+ * injectable so the Windows behaviour can be tested anywhere.
+ */
+export declare function toDisplayPath(repoRoot: string, absPath: string, pathModule?: Pick<typeof nodePath, "relative">): string;
 export declare function toRepoRelative(repoRoot: string, absPath: string): string;
 /**
  * Turns a user-supplied path (`./CLAUDE.md`, `guide.md` typed from `docs/`, an absolute path) into

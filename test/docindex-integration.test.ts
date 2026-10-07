@@ -128,6 +128,7 @@ describe.skipIf(!existsSync(CLI))("`lockwire index`", () => {
     const first = cli(dir, ["index"]);
     expect(first.status).toBe(0);
     expect(first.stdout).toContain("indexed 2 docs (2 markers) → .lockwire/cache/doc-index.json");
+    expect(first.stdout).not.toContain("\\"); // forward slashes on every platform, Windows included
     expect(first.stdout).toContain("built from scratch: read 2 docs");
     expect(existsSync(indexPath(dir))).toBe(true);
 

@@ -20,6 +20,8 @@ async function repo(files: Record<string, string>, config?: Record<string, unkno
   await mkdir(join(dir, "src"));
   await writeFile(join(dir, "src", "a.ts"), A_TS, "utf8");
   await writeFile(join(dir, "src", "b.ts"), "export const b = 1;\n", "utf8");
+  // a repo that has opted into lockwire (the hooks are inert anywhere that hasn't)
+  await writeFile(join(dir, "lockwire.lock"), '{"version":1,"anchors":[]}', "utf8");
   for (const [rel, content] of Object.entries(files)) {
     await mkdir(dirname(join(dir, rel)), { recursive: true });
     await writeFile(join(dir, rel), content, "utf8");
