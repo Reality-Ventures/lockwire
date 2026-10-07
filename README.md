@@ -281,7 +281,7 @@ Inside Claude Code, the hook does this automatically — before the edit, you'd 
 
 ## What lockwire does not do
 
-Hashes cannot catch semantic drift — a doc saying "we use Redux" when the code moved to Zustand, where every file path still resolves and no signature changed. Catching that requires reasoning about meaning, not fingerprints; [ClaudeDrift](https://github.com/marky291/claude-drift) does this well as an on-demand, LLM-reasoning layer, and pairs naturally with lockwire's continuous, deterministic one — see [docs/comparison.md](docs/comparison.md). P0 supports TypeScript, TSX, JavaScript, and Python; cross-file rename detection, a resolver agent, and semantic-claim extraction are roadmap, not shipped — see [docs/concepts.md](docs/concepts.md#limitations).
+Hashes cannot catch semantic drift — a doc saying "we use Redux" when the code moved to Zustand, where every file path still resolves and no signature changed. Catching that requires reasoning about meaning, not fingerprints; [ClaudeDrift](https://github.com/marky291/claude-drift) does this well as an on-demand, LLM-reasoning layer, and pairs naturally with lockwire's continuous, deterministic one — see [docs/comparison.md](docs/comparison.md). P0 supports TypeScript, TSX, JavaScript, and Python; cross-file rename detection, a resolver agent, and semantic-claim extraction are roadmap, not shipped — see [docs/concepts.md](docs/concepts.md#limitations-read-before-relying-on-this-in-production).
 
 ## FAQ
 

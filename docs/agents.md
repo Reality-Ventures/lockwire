@@ -18,7 +18,7 @@ How lockwire wires into Claude Code, Codex, other agents via skills, and MCP.
 {
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
-    "additionalContext": "lockwire: documentation makes claims about this code:\n- CLAUDE.md asserts \"`createSession` takes a `UserId`…\" about src/auth/session.ts#createSession [tiers: sig]\nIf this edit changes what any of these claims assert, update the doc and run `lockwire link <doc>`."
+    "additionalContext": "lockwire: documentation makes claims about this code:\n- CLAUDE.md asserts \"`createSession` takes a `UserId` and returns a `Session` valid for 24 hours.\" about src/auth/session.ts#createSession [tiers: sig]\nIf this edit changes what any of these claims assert, update the doc and run `lockwire link <doc>`."
   }
 }
 ```

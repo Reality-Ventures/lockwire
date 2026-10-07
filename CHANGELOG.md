@@ -33,6 +33,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Fixed
 
+- Links to `docs/concepts.md#limitations` (README, `docs/comparison.md`, this changelog) pointed at a heading anchor that doesn't exist, and the PreToolUse payload sample in `docs/agents.md` showed a truncated claim excerpt the hook doesn't produce for that example. Both found by the new doc tests (`test/docs.test.ts`), which replay the README's `$ lockwire …` transcripts through the real CLI, check the JSON samples in `docs/cli.md` and `docs/agents.md` against real output, and verify every relative link and `#anchor` in the docs — so the next drift fails CI instead of shipping.
 - README/docs: the sample `lockwire check` and `lockwire history` output now matches what the commands print (a mixed doc lists only its non-ok anchors under a correct total; drift events carry no invented `param … added` note; timestamps have milliseconds); the lifecycle diagram no longer shows a `Relocated` state that doesn't exist or `Waived → Drifted` as unconditional; `docs/cli.md` describes the real `ack`, `waive` and JSON behavior; `docs/ledger.md` explains what `actor` and `commit` mean. `docs/agents.md` calls the hooks' fail-open behavior tested; it now is (`test/hook-failopen.test.ts`).
 - Boolean flags swallowed the following argument, so `lockwire check --changed src/a.ts` or `link --reviewed doc.md` lost the path. `--changed`, `--staged`, `--no-write`, `--reviewed` and `--json` no longer take a value.
 - `action.yml` interpolated `inputs.args` directly into the shell command, so a crafted input could inject commands. It is now passed through the environment.
@@ -58,7 +59,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 - A `lockwire.lock` with unresolved git merge conflicts now fails with a message that says so and how to recover, instead of a bare JSON parse error.
 - Hooks now find the repository from the edited file's path (then the hook's reported `cwd`) instead of only the process cwd, so they fire when a session is started in a folder above the repo. Relative paths are resolved against the hook's `cwd`.
 
-### Known limitations (see [docs/concepts.md](docs/concepts.md#limitations))
+### Known limitations (see [docs/concepts.md](docs/concepts.md#limitations-read-before-relying-on-this-in-production))
 
 - Local-variable normalization does not perform real lexical scope analysis.
 - Statement reordering inside a function body is not normalized away.
