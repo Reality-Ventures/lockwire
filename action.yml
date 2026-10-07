@@ -5,7 +5,7 @@ branding:
   color: "blue"
 inputs:
   args:
-    description: "Extra arguments passed to `lockwire check`, e.g. `--changed`."
+    description: "Extra arguments passed to `lockwire check`, e.g. `--changed`. Needs full history for --changed: use actions/checkout with fetch-depth: 0."
     required: false
     default: ""
 runs:
@@ -15,4 +15,8 @@ runs:
       with:
         node-version: "20"
     - shell: bash
-      run: npx --yes lockwire@0.1 check --format github ${{ inputs.args }}
+      # Passed through the environment, never interpolated into the script, so an input can't inject
+      # shell. CI shouldn't rewrite the lockfile or ledger, hence --no-write.
+      env:
+        LOCKWIRE_ARGS: ${{ inputs.args }}
+      run: npx --yes lockwire@0.1 check --format github --no-write $LOCKWIRE_ARGS

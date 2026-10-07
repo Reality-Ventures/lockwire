@@ -216,7 +216,11 @@ export async function linkLockfileOnly(repoRoot, docPath, target, tiers, config,
     });
     return anchor;
 }
-export async function check(repoRoot, config, onlyPaths) {
+export async function check(repoRoot, config, onlyPaths, opts = {}) {
+    // `write: false` is a dry run: same results, but nothing is persisted (CI and pre-commit gates
+    // shouldn't dirty the working tree or append to the ledger).
+    const write = opts.write !== false;
+    const emit = (record) => write ? appendEvent(repoRoot, record) : Promise.resolve(null);
     const lockfile = await readLockfile(repoRoot);
     const now = new Date().toISOString();
     const results = [];
@@ -236,14 +240,20 @@ export async function check(repoRoot, config, onlyPaths) {
             onlyPaths.includes(anchor.target.path) ||
             (anchor.doc !== null && onlyPaths.includes(anchor.doc));
         if (!inScope) {
-            results.push({ anchor, status: anchor.status, driftedTiers: [], singleHashWouldFlag: false });
+            results.push({
+                anchor,
+                status: anchor.status,
+                driftedTiers: [],
+                skipped: true,
+                singleHashWouldFlag: false,
+            });
             continue;
         }
         if (anchor.status === "waived" && anchor.waiver) {
             // Fail closed: an expiry that doesn't parse (hand-edited lock, older version) counts as expired.
             const expiresAt = Date.parse(anchor.waiver.expires);
             if (Number.isNaN(expiresAt) || expiresAt < Date.parse(now)) {
-                await appendEvent(repoRoot, {
+                await emit({
                     ts: now,
                     event: "waiver.expired",
                     anchor: anchor.id,
@@ -272,7 +282,7 @@ export async function check(repoRoot, config, onlyPaths) {
                 const orphaned = { ...anchor, status: "orphaned" };
                 if (anchor.status !== "orphaned") {
                     current = upsertAnchor(current, orphaned);
-                    await appendEvent(repoRoot, {
+                    await emit({
                         ts: now,
                         event: "anchor.orphaned",
                         anchor: anchor.id,
@@ -303,7 +313,7 @@ export async function check(repoRoot, config, onlyPaths) {
             const orphaned = { ...anchor, status: "orphaned" };
             if (anchor.status !== "orphaned") {
                 current = upsertAnchor(current, orphaned);
-                await appendEvent(repoRoot, {
+                await emit({
                     ts: now,
                     event: "anchor.orphaned",
                     anchor: anchor.id,
@@ -350,7 +360,7 @@ export async function check(repoRoot, config, onlyPaths) {
                     };
                 relocatedCount++;
                 current = upsertAnchor(current, relocated);
-                await appendEvent(repoRoot, {
+                await emit({
                     ts: now,
                     event: "anchor.relocated",
                     anchor: anchor.id,
@@ -359,7 +369,7 @@ export async function check(repoRoot, config, onlyPaths) {
                     note: `${anchor.target.symbol} -> ${relocatedTo}`,
                 });
                 for (const tier of movedTiers) {
-                    await appendEvent(repoRoot, {
+                    await emit({
                         ts: now,
                         event: "anchor.drifted",
                         anchor: anchor.id,
@@ -381,7 +391,7 @@ export async function check(repoRoot, config, onlyPaths) {
                 const orphaned = { ...anchor, status: "orphaned" };
                 if (anchor.status !== "orphaned") {
                     current = upsertAnchor(current, orphaned);
-                    await appendEvent(repoRoot, {
+                    await emit({
                         ts: now,
                         event: "anchor.orphaned",
                         anchor: anchor.id,
@@ -406,7 +416,7 @@ export async function check(repoRoot, config, onlyPaths) {
             if (anchor.status !== "drifted") {
                 current = upsertAnchor(current, drifted);
                 for (const tier of driftedTiers) {
-                    await appendEvent(repoRoot, {
+                    await emit({
                         ts: now,
                         event: "anchor.drifted",
                         anchor: anchor.id,
@@ -418,7 +428,7 @@ export async function check(repoRoot, config, onlyPaths) {
                     });
                 }
                 if (claimChanged) {
-                    await appendEvent(repoRoot, {
+                    await emit({
                         ts: now,
                         event: "anchor.drifted",
                         anchor: anchor.id,
@@ -440,7 +450,7 @@ export async function check(repoRoot, config, onlyPaths) {
             if (anchor.status === "drifted" && anyTierChanged.length === 0) {
                 const resolvedAnchor = { ...anchor, status: "fresh" };
                 current = upsertAnchor(current, resolvedAnchor);
-                await appendEvent(repoRoot, {
+                await emit({
                     ts: now,
                     event: "anchor.resolved",
                     anchor: anchor.id,
@@ -466,23 +476,26 @@ export async function check(repoRoot, config, onlyPaths) {
     }
     // Don't conjure an empty lockwire.lock in a directory that never had one (e.g. an MCP server
     // rooted at a parent folder of the real repo).
-    if (lockfile.anchors.length > 0 || existsSync(lockfilePath(repoRoot)))
+    if (write && (lockfile.anchors.length > 0 || existsSync(lockfilePath(repoRoot))))
         await writeLockfile(repoRoot, current);
-    const singleHashWouldFlag = results.filter((r) => r.singleHashWouldFlag).length;
+    // Anchors outside a scoped run weren't examined: they stay in `results` (callers like the hooks
+    // look anchors up there) but must not count towards the summary or the exit code.
+    const examined = results.filter((r) => !r.skipped);
+    const singleHashWouldFlag = examined.filter((r) => r.singleHashWouldFlag).length;
     // The noise comparison is about code fingerprints; a claim-only flag has no single-hash counterpart.
-    const tieredFlagged = results.filter((r) => (r.status === "drifted" || r.status === "orphaned") &&
+    const tieredFlagged = examined.filter((r) => (r.status === "drifted" || r.status === "orphaned") &&
         !(r.claimChanged && r.driftedTiers.length === 0)).length;
     const reductionPercent = singleHashWouldFlag === 0
         ? 0
         : Math.round(((singleHashWouldFlag - tieredFlagged) / singleHashWouldFlag) * 1000) / 10;
     const summary = {
-        anchors: results.length,
-        fresh: results.filter((r) => r.status === "fresh").length,
-        drifted: results.filter((r) => r.status === "drifted").length,
+        anchors: examined.length,
+        fresh: examined.filter((r) => r.status === "fresh").length,
+        drifted: examined.filter((r) => r.status === "drifted").length,
         relocated: relocatedCount,
-        orphaned: results.filter((r) => r.status === "orphaned").length,
-        waived: results.filter((r) => r.status === "waived").length,
-        superseded: results.filter((r) => r.status === "superseded").length,
+        orphaned: examined.filter((r) => r.status === "orphaned").length,
+        waived: examined.filter((r) => r.status === "waived").length,
+        superseded: examined.filter((r) => r.status === "superseded").length,
         noise: { singleHashWouldFlag, tieredFlagged, reductionPercent },
     };
     return { summary, results };

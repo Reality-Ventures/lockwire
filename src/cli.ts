@@ -14,6 +14,7 @@ import {
   waive,
 } from "./actions.js";
 import { cliActor } from "./actor.js";
+import { changedFiles } from "./changed.js";
 import { readConfig, writeConfig } from "./config.js";
 import { formatGithub, formatJson, formatText } from "./format.js";
 import { runClaudeHook } from "./hook-claude.js";
@@ -23,6 +24,9 @@ import { readLockfile, writeLockfile } from "./lockfile.js";
 import { findRepoRoot, isPathGitignored, toRepoPath } from "./repo.js";
 import type { Tier } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
+
+/** Flags that never take a value, so `check --changed src/a.ts` leaves `src/a.ts` a path. */
+const BOOLEAN_FLAGS = new Set(["changed", "staged", "no-write", "reviewed", "json"]);
 
 function parseFlags(args: string[]): {
   positional: string[];
@@ -36,7 +40,7 @@ function parseFlags(args: string[]): {
     if (a.startsWith("--")) {
       const key = a.slice(2);
       const next = args[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
+      if (!BOOLEAN_FLAGS.has(key) && next !== undefined && !next.startsWith("--")) {
         flags[key] = next;
         i++;
       } else {
@@ -122,9 +126,18 @@ async function main() {
 
     case "check": {
       const config = await readConfig(repoRoot);
-      const changedOnly =
-        positional.length > 0 ? positional.map((p) => toRepoPath(repoRoot, p)) : undefined;
-      const result = await check(repoRoot, config, changedOnly);
+      const scopedByGit = Boolean(flags.changed || flags.staged);
+      if (scopedByGit && positional.length > 0)
+        throw new Error("pass either paths or --changed/--staged, not both");
+      const changedOnly = scopedByGit
+        ? changedFiles(repoRoot, {
+            ...(typeof flags.base === "string" ? { base: flags.base } : {}),
+            staged: Boolean(flags.staged),
+          })
+        : positional.length > 0
+          ? positional.map((p) => toRepoPath(repoRoot, p))
+          : undefined;
+      const result = await check(repoRoot, config, changedOnly, { write: !flags["no-write"] });
       const fmt = typeof flags.format === "string" ? flags.format : "text";
       const out =
         fmt === "json"

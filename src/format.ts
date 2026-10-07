@@ -5,7 +5,7 @@ const VERSION = "0.1.0";
 export function formatText(result: CheckResult): string {
   const lines: string[] = [];
   const byDoc = new Map<string, typeof result.results>();
-  for (const r of result.results) {
+  for (const r of result.results.filter((x) => !x.skipped)) {
     const key = r.anchor.doc ?? "(lockfile-only)";
     const list = byDoc.get(key) ?? [];
     list.push(r);
@@ -48,23 +48,25 @@ export function formatJson(result: CheckResult, repo: string | null): string {
     repo,
     checkedAt: new Date().toISOString(),
     summary: result.summary,
-    anchors: result.results.map((r) => ({
-      id: r.anchor.id,
-      doc: r.anchor.doc,
-      line: r.anchor.claim?.line ?? null,
-      target: `${r.anchor.target.path}${r.anchor.target.symbol ? `#${r.anchor.target.symbol}` : ""}`,
-      status: r.status,
-      driftedTiers: r.driftedTiers,
-      claimChanged: r.claimChanged ?? false,
-      excerpt: r.anchor.claim?.excerpt ?? null,
-    })),
+    anchors: result.results
+      .filter((r) => !r.skipped)
+      .map((r) => ({
+        id: r.anchor.id,
+        doc: r.anchor.doc,
+        line: r.anchor.claim?.line ?? null,
+        target: `${r.anchor.target.path}${r.anchor.target.symbol ? `#${r.anchor.target.symbol}` : ""}`,
+        status: r.status,
+        driftedTiers: r.driftedTiers,
+        claimChanged: r.claimChanged ?? false,
+        excerpt: r.anchor.claim?.excerpt ?? null,
+      })),
   };
   return JSON.stringify(payload, null, 2);
 }
 
 export function formatGithub(result: CheckResult): string {
   const lines: string[] = [];
-  for (const r of result.results) {
+  for (const r of result.results.filter((x) => !x.skipped)) {
     if (r.status !== "drifted" && r.status !== "orphaned") continue;
     const target = `${r.anchor.target.path}${r.anchor.target.symbol ? `#${r.anchor.target.symbol}` : ""}`;
     const file = r.anchor.doc ?? r.anchor.target.path;

@@ -2,7 +2,7 @@ const VERSION = "0.1.0";
 export function formatText(result) {
     const lines = [];
     const byDoc = new Map();
-    for (const r of result.results) {
+    for (const r of result.results.filter((x) => !x.skipped)) {
         const key = r.anchor.doc ?? "(lockfile-only)";
         const list = byDoc.get(key) ?? [];
         list.push(r);
@@ -36,7 +36,9 @@ export function formatJson(result, repo) {
         repo,
         checkedAt: new Date().toISOString(),
         summary: result.summary,
-        anchors: result.results.map((r) => ({
+        anchors: result.results
+            .filter((r) => !r.skipped)
+            .map((r) => ({
             id: r.anchor.id,
             doc: r.anchor.doc,
             line: r.anchor.claim?.line ?? null,
@@ -51,7 +53,7 @@ export function formatJson(result, repo) {
 }
 export function formatGithub(result) {
     const lines = [];
-    for (const r of result.results) {
+    for (const r of result.results.filter((x) => !x.skipped)) {
         if (r.status !== "drifted" && r.status !== "orphaned")
             continue;
         const target = `${r.anchor.target.path}${r.anchor.target.symbol ? `#${r.anchor.target.symbol}` : ""}`;

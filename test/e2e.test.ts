@@ -477,3 +477,41 @@ describe("duplicate ids, lapsed waivers and ack", () => {
     expect(after.claimChanged).toBeUndefined();
   });
 });
+
+describe("scoped checks and dry runs", () => {
+  const actor = { type: "human" as const };
+
+  it("anchors outside a scoped run are listed as skipped but never counted or failed", async () => {
+    const repo = await tempRepo();
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    const scoped = await check(repo, DEFAULT_CONFIG, ["unrelated.ts"]);
+    expect(scoped.summary).toMatchObject({ anchors: 0, fresh: 0, drifted: 0, orphaned: 0 });
+    expect(scoped.results).toHaveLength(1);
+    expect(scoped.results[0]?.skipped).toBe(true);
+
+    const inScope = await check(repo, DEFAULT_CONFIG, ["src/session.ts"]);
+    expect(inScope.summary.anchors).toBe(1);
+    expect(inScope.results[0]?.skipped).toBeUndefined();
+  });
+
+  it("write: false reports the same drift but persists nothing", async () => {
+    const repo = await tempRepo();
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    await writeFile(
+      join(repo, "src", "session.ts"),
+      SESSION_TS.replace("ttl = 3600", "ttl = 3600, extra = 1"),
+      "utf8",
+    );
+    const lockBefore = await readFile(join(repo, "lockwire.lock"), "utf8");
+    const ledgerBefore = await readFile(join(repo, ".lockwire", "ledger.jsonl"), "utf8");
+
+    const dry = await check(repo, DEFAULT_CONFIG, undefined, { write: false });
+    expect(dry.summary.drifted).toBe(1);
+    expect(await readFile(join(repo, "lockwire.lock"), "utf8")).toBe(lockBefore);
+    expect(await readFile(join(repo, ".lockwire", "ledger.jsonl"), "utf8")).toBe(ledgerBefore);
+
+    const real = await check(repo, DEFAULT_CONFIG);
+    expect(real.summary.drifted).toBe(1);
+    expect(await readFile(join(repo, "lockwire.lock"), "utf8")).not.toBe(lockBefore);
+  });
+});

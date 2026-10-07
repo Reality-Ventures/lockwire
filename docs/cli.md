@@ -31,16 +31,29 @@ Creates a **lockfile-only** anchor: a whole-doc-to-code binding with no inline m
 lockwire link docs/auth.md src/auth/session.ts#createSession --tiers sig,deps
 ```
 
-## `lockwire check [paths…] [--changed] [--format text|json|github]`
+## `lockwire check [paths…] [--changed | --staged] [--base <ref>] [--no-write] [--format text|json|github]`
 
-Recomputes fingerprints for every anchor (or only anchors whose target is in `paths`), compares against the stored value for each bound tier, updates `lockwire.lock`, appends ledger events for any status transition, and prints a report. Exits `1` if any anchor is `drifted` or `orphaned`, `0` otherwise.
+Recomputes fingerprints for every anchor, compares against the stored value for each bound tier, updates `lockwire.lock`, appends ledger events for any status transition, and prints a report. Exits `1` if any examined anchor is `drifted` or `orphaned`, `0` otherwise.
+
+Scoping — anchors outside the scope aren't examined, aren't reported, and can't fail the run:
+
+- `paths…` — anchors whose target **or doc** is one of these paths. Paths resolve against your cwd.
+- `--changed` — anchors on files this branch touched: everything that differs from the merge base with the base branch (committed, uncommitted and untracked). Both sides of a rename count, so a moved file orphans its anchors. A doc edit counts too, which is how a rewritten claim gets caught. The base is `--base <ref>`, else `origin/$GITHUB_BASE_REF` in a pull-request job, else `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. If none exists, `check` stops and says so instead of guessing.
+- `--staged` — only what's staged for the next commit (for a pre-commit hook).
+
+`--no-write` is a dry run: same report and exit code, but `lockwire.lock` and the ledger are left exactly as they were. Use it in CI and pre-commit so a gate never dirties the working tree.
 
 ```bash
 lockwire check
 lockwire check src/auth/session.ts
+lockwire check --changed --no-write         # CI / before pushing
+lockwire check --staged --no-write          # pre-commit
+lockwire check --changed --base origin/dev
 lockwire check --format json
 lockwire check --format github    # ::error annotations for GitHub Actions
 ```
+
+In CI, `--changed` needs history to find the merge base: use `actions/checkout` with `fetch-depth: 0`.
 
 The text report ends with the noise line:
 

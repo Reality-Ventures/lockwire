@@ -41,7 +41,7 @@ After an edit, if `additionalContext` says a claim drifted:
 
 ```bash
 lockwire check              # every anchor in the repo
-lockwire check --changed    # only anchors covering files this branch touched
+lockwire check --changed    # only anchors covering files this branch touched (add --no-write to leave the lock/ledger alone)
 ```
 
 Exits non-zero if anything is `drifted` or `orphaned`.

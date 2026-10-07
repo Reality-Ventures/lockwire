@@ -42,6 +42,8 @@ export interface AnchorCheckResult {
     driftedTiers: Tier[];
     /** The claim sentence in the doc was edited (or its marker removed) since the anchor was stamped. */
     claimChanged?: boolean;
+    /** Outside the scope of a path-limited run: reported with its stored status, not re-examined. */
+    skipped?: boolean;
     singleHashWouldFlag: boolean;
 }
 export interface CheckSummary {
@@ -62,7 +64,9 @@ export interface CheckResult {
     summary: CheckSummary;
     results: AnchorCheckResult[];
 }
-export declare function check(repoRoot: string, config: LockwireConfig, onlyPaths?: readonly string[]): Promise<CheckResult>;
+export declare function check(repoRoot: string, config: LockwireConfig, onlyPaths?: readonly string[], opts?: {
+    write?: boolean;
+}): Promise<CheckResult>;
 export declare function discoverDocs(repoRoot: string, config: LockwireConfig): Promise<string[]>;
 export declare function ack(repoRoot: string, anchorId: string, resolution: "updated" | "superseded" | "false-positive", note: string | undefined, actor: Actor, config: LockwireConfig): Promise<Anchor>;
 export declare function waive(repoRoot: string, anchorId: string, reason: string, expires: string, actor: Actor): Promise<Anchor>;

@@ -16,8 +16,19 @@ All notable changes to this project are documented here. Format follows [Keep a 
 - Time-boxed waivers with expiry, and a relink gate requiring `--reviewed` to re-stamp a currently-drifted anchor.
 - GitHub Action (`action.yml`) for merge-time enforcement.
 
+### Added
+
+- `lockwire check --changed`: only examine anchors on files this branch touched (committed, uncommitted and untracked, against the merge base with the base branch; both sides of a rename; a doc edit counts too). The base comes from `--base <ref>`, `GITHUB_BASE_REF` in pull-request jobs, or the repo's default branch, and `check` stops with instructions rather than guessing when it can't find one. `--staged` limits it to the index, for a pre-commit hook. Both were documented (README, `docs/cli.md`, the GitHub Action) but silently ignored.
+- `lockwire check --no-write`: a dry run that leaves `lockwire.lock` and the ledger untouched. The GitHub Action now always passes it.
+
+### Changed
+
+- A path-scoped `check` (`check <paths>`, `--changed`, `--staged`) no longer counts anchors it didn't examine in its summary, so an unrelated anchor that happens to be stored as drifted can't fail the run. They remain in the JSON/library `results` with `skipped: true`.
+
 ### Fixed
 
+- Boolean flags swallowed the following argument, so `lockwire check --changed src/a.ts` or `link --reviewed doc.md` lost the path. `--changed`, `--staged`, `--no-write`, `--reviewed` and `--json` no longer take a value.
+- `action.yml` interpolated `inputs.args` directly into the shell command, so a crafted input could inject commands. It is now passed through the environment.
 - `lockwire ack` (`updated` / `false-positive`) on an anchor whose target no longer exists stored empty fingerprints and marked it fresh. It now refuses and points at `--resolution superseded` or `lockwire unlink`. `ack` also re-stamps the claim from the doc, so an expected claim edit stops being flagged (previously only `link` did that, though the hook message suggested `ack`).
 - A waiver that lapsed was reported as `drifted` on every tier regardless of the code, then flipped to fresh on the next check. A lapsed waiver now simply stops suppressing and the anchor is evaluated from the code: fresh if nothing moved, drifted (with the real tiers) if something did.
 - The same marker id twice in one doc silently produced a false drift right after `link`. The second marker now gets its own id.

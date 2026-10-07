@@ -193,15 +193,19 @@ npx lockwire check
 **GitHub Action** — merge-time gate:
 
 ```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0   # --changed needs history to find the merge base
 - uses: Reality-Ventures/lockwire@v0
   with:
     args: --changed
 ```
 
-**pre-commit** — commit-time gate:
+**pre-commit** — commit-time gate, as a plain git hook (`.git/hooks/pre-commit`, made executable):
 
 ```bash
-lockwire check --changed
+#!/bin/sh
+npx --no-install lockwire check --staged --no-write
 ```
 
 ## Quickstart
