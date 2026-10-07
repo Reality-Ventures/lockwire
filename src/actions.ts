@@ -22,7 +22,15 @@ import {
   stampMarkerLine,
 } from "./markers.js";
 import { globToRegExp, matchesAny, toRepoRelative, walkFiles } from "./repo.js";
-import type { Actor, Anchor, FileSymbols, Fingerprints, LockwireConfig, Tier } from "./types.js";
+import type {
+  Actor,
+  Anchor,
+  FileSymbols,
+  Fingerprints,
+  Lockfile,
+  LockwireConfig,
+  Tier,
+} from "./types.js";
 import { ALL_TIERS } from "./types.js";
 
 export interface TargetResolution {
@@ -344,12 +352,93 @@ export interface UnlinkedMarker {
   line: number;
   target: string;
   reason: string;
+  /** The claim sentence under the marker, so a reader can see what is being asserted. */
+  excerpt: string;
 }
 
 export interface CheckResult {
   summary: CheckSummary;
   results: AnchorCheckResult[];
   unlinked: UnlinkedMarker[];
+}
+
+/** Whether `path` is a doc the config selects for scanning (`docs`, minus `exclude`, never vendored dirs). */
+export function isScannedDoc(path: string, config: LockwireConfig): boolean {
+  return (
+    matchesAny(path, config.docs) &&
+    !matchesAny(path, config.exclude) &&
+    !path.split("/").some((seg) => seg === ".git" || seg === "node_modules" || seg === ".lockwire")
+  );
+}
+
+/** A cached reader of a doc's markers, or null when the doc doesn't exist. */
+export function markerReader(repoRoot: string) {
+  const cache = new Map<string, DocMarker[] | null>();
+  return async (doc: string): Promise<DocMarker[] | null> => {
+    if (!cache.has(doc)) {
+      const abs = `${repoRoot}/${doc}`;
+      cache.set(doc, existsSync(abs) ? scanMarkers(await readFile(abs, "utf8")) : null);
+    }
+    return cache.get(doc) ?? null;
+  };
+}
+
+/**
+ * Markers in `docs` that no anchor in `lockfile` backs: no `id=` yet, an id that matches no anchor, an
+ * id that belongs to the marker in another doc (a copy-paste), or one used twice in a doc. Until
+ * `lockwire link` runs, such a claim isn't being checked at all.
+ */
+export async function findUnlinkedMarkers(
+  lockfile: Lockfile,
+  docs: readonly string[],
+  readMarkers: (doc: string) => Promise<DocMarker[] | null>,
+): Promise<UnlinkedMarker[]> {
+  const unlinked: UnlinkedMarker[] = [];
+  for (const doc of [...docs].sort()) {
+    const markers = await readMarkers(doc);
+    if (!markers) continue;
+    const seenIds = new Set<string>();
+    for (const m of markers) {
+      let reason: string | null = null;
+      const anchor = m.id ? lockfile.anchors.find((a) => a.id === m.id) : undefined;
+      if (!m.id) reason = "not linked yet";
+      else if (!anchor) reason = `id ${m.id} matches no anchor`;
+      else if (seenIds.has(m.id)) reason = `id ${m.id} appears twice in this doc`;
+      else if (anchor.doc && anchor.doc !== doc) {
+        const stillThere = (await readMarkers(anchor.doc))?.some((x) => x.id === m.id);
+        if (stillThere) reason = `id ${m.id} belongs to the marker in ${anchor.doc}`;
+      }
+      if (m.id) seenIds.add(m.id);
+      if (reason)
+        unlinked.push({
+          doc,
+          line: m.line,
+          target: `${m.target.path}${m.target.symbol ? `#${m.target.symbol}` : ""}`,
+          reason,
+          excerpt: m.claimExcerpt,
+        });
+    }
+  }
+  return unlinked;
+}
+
+/** Claims written in the docs about this file (or symbol) that no anchor backs. */
+export async function unlinkedFor(
+  repoRoot: string,
+  config: LockwireConfig,
+  path: string,
+  symbol?: string,
+): Promise<UnlinkedMarker[]> {
+  const lockfile = await readLockfile(repoRoot);
+  const all = await findUnlinkedMarkers(
+    lockfile,
+    await discoverDocs(repoRoot, config),
+    markerReader(repoRoot),
+  );
+  const wanted = symbol ? `${path}#${symbol}` : null;
+  return all.filter((u) =>
+    wanted ? u.target === wanted : u.target === path || u.target.startsWith(`${path}#`),
+  );
 }
 
 export async function check(
@@ -375,14 +464,7 @@ export async function check(
   const results: AnchorCheckResult[] = [];
   let current = lockfile;
   let relocatedCount = 0;
-  const docMarkers = new Map<string, DocMarker[] | null>();
-  async function markersIn(doc: string): Promise<DocMarker[] | null> {
-    if (!docMarkers.has(doc)) {
-      const abs = `${repoRoot}/${doc}`;
-      docMarkers.set(doc, existsSync(abs) ? scanMarkers(await readFile(abs, "utf8")) : null);
-    }
-    return docMarkers.get(doc) ?? null;
-  }
+  const markersIn = markerReader(repoRoot);
 
   for (const stored of lockfile.anchors) {
     let anchor = stored;
@@ -662,41 +744,12 @@ export async function check(
   // Anchors outside a scoped run weren't examined: they stay in `results` (callers like the hooks
   // look anchors up there) but must not count towards the summary or the exit code.
   const examined = results.filter((r) => !r.skipped);
-  // The other thing a claim can be: not bound at all. A marker with no `id=`, or whose id no anchor
-  // backs, is silently unprotected until `lockwire link` runs. Scoped runs (hooks, --changed) only
-  // look at docs in scope and never walk the tree.
-  const unlinked: UnlinkedMarker[] = [];
-  const isScannedDoc = (p: string) =>
-    matchesAny(p, config.docs) &&
-    !matchesAny(p, config.exclude) &&
-    !p.split("/").some((seg) => seg === ".git" || seg === "node_modules" || seg === ".lockwire");
+  // The other thing a claim can be: not bound at all (see findUnlinkedMarkers). Scoped runs (hooks,
+  // --changed) only look at docs in scope and never walk the tree.
   const docsToScan = onlyPaths
-    ? [...new Set(onlyPaths)].filter(isScannedDoc)
+    ? [...new Set(onlyPaths)].filter((p) => isScannedDoc(p, config))
     : await discoverDocs(repoRoot, config);
-  for (const doc of docsToScan.sort()) {
-    const markers = await markersIn(doc);
-    if (!markers) continue;
-    const seenIds = new Set<string>();
-    for (const m of markers) {
-      let reason: string | null = null;
-      const anchor = m.id ? lockfile.anchors.find((a) => a.id === m.id) : undefined;
-      if (!m.id) reason = "not linked yet";
-      else if (!anchor) reason = `id ${m.id} matches no anchor`;
-      else if (seenIds.has(m.id)) reason = `id ${m.id} appears twice in this doc`;
-      else if (anchor.doc && anchor.doc !== doc) {
-        const stillThere = (await markersIn(anchor.doc))?.some((x) => x.id === m.id);
-        if (stillThere) reason = `id ${m.id} belongs to the marker in ${anchor.doc}`;
-      }
-      if (m.id) seenIds.add(m.id);
-      if (reason)
-        unlinked.push({
-          doc,
-          line: m.line,
-          target: `${m.target.path}${m.target.symbol ? `#${m.target.symbol}` : ""}`,
-          reason,
-        });
-    }
-  }
+  const unlinked = await findUnlinkedMarkers(lockfile, docsToScan, markersIn);
 
   const singleHashWouldFlag = examined.filter((r) => r.singleHashWouldFlag).length;
   // The noise comparison is about code fingerprints; a claim-only flag has no single-hash counterpart.

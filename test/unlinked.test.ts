@@ -39,7 +39,13 @@ describe("check reports markers that no anchor backs", () => {
   it("a marker with no id is 'not linked yet', with its line and target, and linking clears it", async () => {
     const dir = await repo({ "CLAUDE.md": `# D\n\nintro\n\n${M()}\nalpha adds one.\n` });
     expect(await unlinkedOf(dir)).toEqual([
-      { doc: "CLAUDE.md", line: 5, target: "src/a.ts#alpha", reason: "not linked yet" },
+      {
+        doc: "CLAUDE.md",
+        line: 5,
+        target: "src/a.ts#alpha",
+        reason: "not linked yet",
+        excerpt: "alpha adds one.",
+      },
     ]);
     await linkDoc(dir, "CLAUDE.md", DEFAULT_CONFIG, actor);
     expect(await unlinkedOf(dir)).toEqual([]);
@@ -61,6 +67,7 @@ describe("check reports markers that no anchor backs", () => {
         line: 3,
         target: "src/a.ts#alpha",
         reason: "id orig0001 belongs to the marker in CLAUDE.md",
+        excerpt: "alpha adds one.",
       },
     ]);
     await linkDoc(dir, "COPY.md", DEFAULT_CONFIG, actor);

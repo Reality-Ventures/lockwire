@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -85,10 +85,142 @@ describe("MCP server tools", () => {
       name: "lockwire_claims_for",
       arguments: { path: "src/session.ts" },
     });
-    expect(JSON.parse(firstText(result as never))).toHaveLength(1);
+    const { anchors, unlinked } = JSON.parse(firstText(result as never));
+    expect(anchors).toHaveLength(1);
+    expect(unlinked).toEqual([]);
   });
 
-  it("lockwire_refs returns the same reverse lookup as claims_for", async () => {
+  describe("lockwire_claims_for also surfaces claims nobody has linked", () => {
+    const call = async (args: Record<string, unknown>) => {
+      const client = await connectedClient(repo);
+      const result = await client.callTool({ name: "lockwire_claims_for", arguments: args });
+      return JSON.parse(firstText(result as never)) as {
+        anchors: { id: string }[];
+        unlinked: { doc: string; line: number; target: string; reason: string; excerpt: string }[];
+      };
+    };
+    const marker = (target: string, id = "") => `<!-- lockwire ${target} sig${id} -->`;
+    const writeDoc = (rel: string, target: string, sentence: string, id = "") =>
+      writeFile(join(repo, rel), `# D\n\n${marker(target, id)}\n${sentence}\n`, "utf8");
+
+    it("an unlinked claim about the file comes back with the sentence, so the agent can read what's asserted", async () => {
+      await writeDoc("NOTES.md", "src/session.ts#createSession", "Sessions are valid for 24 hours.");
+      const { anchors, unlinked } = await call({ path: "src/session.ts" });
+      expect(anchors).toHaveLength(1); // the linked claim from CLAUDE.md is still there
+      expect(unlinked).toEqual([
+        {
+          doc: "NOTES.md",
+          line: 3,
+          target: "src/session.ts#createSession",
+          reason: "not linked yet",
+          excerpt: "Sessions are valid for 24 hours.",
+        },
+      ]);
+    });
+
+    it("asking about a file includes unlinked claims on any symbol in it; asking about a symbol is exact", async () => {
+      await writeDoc("A.md", "src/session.ts#createSession", "About createSession.");
+      await writeDoc("B.md", "src/session.ts#otherThing", "About something else.");
+      await writeDoc("C.md", "src/session.ts", "About the whole file.");
+      const file = await call({ path: "src/session.ts" });
+      expect(file.unlinked.map((u) => u.doc)).toEqual(["A.md", "B.md", "C.md"]);
+      const symbol = await call({ path: "src/session.ts", symbol: "createSession" });
+      expect(symbol.unlinked.map((u) => u.doc)).toEqual(["A.md"]);
+    });
+
+    it("claims about other files, and look-alike paths, don't leak in", async () => {
+      await writeDoc("A.md", "src/other.ts#f", "About another file.");
+      await writeDoc("B.md", "src/session.tsx#g", "About a look-alike path.");
+      await writeDoc("C.md", "src/session.ts.bak", "About a backup.");
+      expect((await call({ path: "src/session.ts" })).unlinked).toEqual([]);
+    });
+
+    it("once the claim is linked it moves from `unlinked` to `anchors`", async () => {
+      await writeDoc("NOTES.md", "src/session.ts#createSession", "Linked later.");
+      expect((await call({ path: "src/session.ts" })).unlinked).toHaveLength(1);
+      await linkDoc(repo, "NOTES.md", DEFAULT_CONFIG, { type: "human" });
+      const after = await call({ path: "src/session.ts" });
+      expect(after.unlinked).toEqual([]);
+      expect(after.anchors).toHaveLength(2);
+    });
+
+    it("a copy-pasted marker shows up as unlinked, explaining whose id it borrowed", async () => {
+      const stamped = (await readFile(join(repo, "CLAUDE.md"), "utf8")).split("\n").find((l) => l.includes("id="));
+      await writeFile(join(repo, "COPY.md"), `# C\n\n${stamped}\nCopied claim.\n`, "utf8");
+      const { unlinked } = await call({ path: "src/session.ts" });
+      expect(unlinked).toHaveLength(1);
+      expect(unlinked[0]?.reason).toBe(`id ${anchorId} belongs to the marker in CLAUDE.md`);
+    });
+
+    it("only docs the config selects, and not fenced examples, count", async () => {
+      await writeDoc("CHANGELOG.md", "src/session.ts#createSession", "Excluded by default.");
+      await mkdir(join(repo, "node_modules", "pkg"), { recursive: true });
+      await writeDoc("node_modules/pkg/README.md", "src/session.ts#createSession", "Vendored.");
+      await writeFile(
+        join(repo, "README.md"),
+        `# R\n\n\`\`\`markdown\n${marker("src/session.ts#createSession")}\nexample\n\`\`\`\n`,
+        "utf8",
+      );
+      expect((await call({ path: "src/session.ts" })).unlinked).toEqual([]);
+    });
+
+    it("accepts the path the way agents send it: absolute or ./-prefixed", async () => {
+      await writeDoc("NOTES.md", "src/session.ts#createSession", "Unlinked.");
+      expect((await call({ path: join(repo, "src", "session.ts") })).unlinked).toHaveLength(1);
+      expect((await call({ path: "./src/session.ts" })).unlinked).toHaveLength(1);
+    });
+
+    it("works when the lockfile has no anchors at all, and says so plainly when there's no lockfile", async () => {
+      const empty = await mkdtemp(join(tmpdir(), "lockwire-mcp-claims-"));
+      await mkdir(join(empty, "src"));
+      await writeFile(join(empty, "src", "a.ts"), "export function a() {}\n", "utf8");
+      await writeFile(join(empty, "lockwire.lock"), '{"version":1,"anchors":[]}', "utf8");
+      await writeFile(join(empty, "N.md"), `# N\n\n${marker("src/a.ts#a")}\nUnlinked.\n`, "utf8");
+      const client = await connectedClient(empty);
+      const res = await client.callTool({ name: "lockwire_claims_for", arguments: { path: "src/a.ts" } });
+      const out = JSON.parse(firstText(res as never));
+      expect(out.anchors).toEqual([]);
+      expect(out.unlinked).toHaveLength(1);
+
+      const bare = await mkdtemp(join(tmpdir(), "lockwire-mcp-bare2-"));
+      const bareRes = await (await connectedClient(bare)).callTool({
+        name: "lockwire_claims_for",
+        arguments: { path: "x.ts" },
+      });
+      expect(firstText(bareRes as never)).toContain("No lockwire.lock found");
+    });
+
+    it("writes nothing: it is a read, as its annotations say", async () => {
+      await writeDoc("NOTES.md", "src/session.ts#createSession", "Unlinked.");
+      const before = [
+        await readFile(join(repo, "lockwire.lock"), "utf8"),
+        await readFile(join(repo, "NOTES.md"), "utf8"),
+        await readFile(join(repo, ".lockwire", "ledger.jsonl"), "utf8"),
+      ];
+      await call({ path: "src/session.ts" });
+      await call({ path: "src/session.ts", symbol: "createSession" });
+      expect([
+        await readFile(join(repo, "lockwire.lock"), "utf8"),
+        await readFile(join(repo, "NOTES.md"), "utf8"),
+        await readFile(join(repo, ".lockwire", "ledger.jsonl"), "utf8"),
+      ]).toEqual(before);
+    });
+  });
+
+  it("lockwire_refs stays the plain anchor lookup, with no unlinked claims mixed in", async () => {
+    await writeFile(
+      join(repo, "NOTES.md"),
+      "# N\n\n<!-- lockwire src/session.ts#createSession sig -->\nUnlinked.\n",
+      "utf8",
+    );
+    const client = await connectedClient(repo);
+    const result = await client.callTool({ name: "lockwire_refs", arguments: { path: "src/session.ts" } });
+    const out = JSON.parse(firstText(result as never));
+    expect(Array.isArray(out)).toBe(true);
+    expect(out).toHaveLength(1);
+  });
+
+  it("lockwire_refs returns the same reverse lookup as claims_for's anchors", async () => {
     const client = await connectedClient(repo);
     const result = await client.callTool({
       name: "lockwire_refs",
@@ -128,7 +260,13 @@ describe("MCP server tools", () => {
     const { anchors, unlinked } = JSON.parse(firstText(result as never));
     expect(anchors).toEqual([]);
     expect(unlinked).toEqual([
-      { doc: "NOTES.md", line: 3, target: "src/session.ts#createSession", reason: "not linked yet" },
+      {
+        doc: "NOTES.md",
+        line: 3,
+        target: "src/session.ts#createSession",
+        reason: "not linked yet",
+        excerpt: "A claim nobody linked.",
+      },
     ]);
   });
 

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { ack, check, history, linkDoc, refs, status, waive } from "./actions.js";
+import { ack, check, history, linkDoc, refs, status, unlinkedFor, waive } from "./actions.js";
 import { readConfig } from "./config.js";
 import { lockfilePath } from "./lockfile.js";
 import { toRepoPath } from "./repo.js";
@@ -30,17 +30,25 @@ export function createServer(repoRoot) {
     // across the board. The other three hints vary per tool; see each one's own comment for why.
     server.registerTool("lockwire_claims_for", {
         title: "Claims for code",
-        description: "What does the documentation assert about this file or symbol? Call before editing.",
+        description: "What does the documentation assert about this file or symbol? Call before editing. Returns `anchors` (claims lockwire is checking) and `unlinked` (claims written in a doc about this code that nobody has linked yet, so nothing is checking them — treat them as real claims too).",
         inputSchema: { path: z.string(), symbol: z.string().optional() },
-        // Pure read (refs() only calls readLockfile) -- repeat calls are trivially idempotent.
+        // Pure read (the lockfile and the docs; nothing is written) -- repeat calls are trivially idempotent.
         annotations: {
             readOnlyHint: true,
             destructiveHint: false,
             idempotentHint: true,
             openWorldHint: false,
         },
-    }, async ({ path, symbol }) => text(missingLockNote(repoRoot) ??
-        (await refs(repoRoot, toRepoPath(repoRoot, path, repoRoot), symbol))));
+    }, async ({ path, symbol }) => {
+        const note = missingLockNote(repoRoot);
+        if (note)
+            return text(note);
+        const repoPath = toRepoPath(repoRoot, path, repoRoot);
+        return text({
+            anchors: await refs(repoRoot, repoPath, symbol),
+            unlinked: await unlinkedFor(repoRoot, await readConfig(repoRoot), repoPath, symbol),
+        });
+    });
     server.registerTool("lockwire_refs", {
         title: "Reverse lookup",
         description: "Which documentation claims reference this file or symbol.",

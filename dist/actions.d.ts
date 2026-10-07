@@ -1,4 +1,5 @@
-import type { Actor, Anchor, FileSymbols, Fingerprints, LockwireConfig, Tier } from "./types.js";
+import { type DocMarker } from "./markers.js";
+import type { Actor, Anchor, FileSymbols, Fingerprints, Lockfile, LockwireConfig, Tier } from "./types.js";
 export interface TargetResolution {
     found: boolean;
     fingerprints: Fingerprints;
@@ -68,12 +69,26 @@ export interface UnlinkedMarker {
     line: number;
     target: string;
     reason: string;
+    /** The claim sentence under the marker, so a reader can see what is being asserted. */
+    excerpt: string;
 }
 export interface CheckResult {
     summary: CheckSummary;
     results: AnchorCheckResult[];
     unlinked: UnlinkedMarker[];
 }
+/** Whether `path` is a doc the config selects for scanning (`docs`, minus `exclude`, never vendored dirs). */
+export declare function isScannedDoc(path: string, config: LockwireConfig): boolean;
+/** A cached reader of a doc's markers, or null when the doc doesn't exist. */
+export declare function markerReader(repoRoot: string): (doc: string) => Promise<DocMarker[] | null>;
+/**
+ * Markers in `docs` that no anchor in `lockfile` backs: no `id=` yet, an id that matches no anchor, an
+ * id that belongs to the marker in another doc (a copy-paste), or one used twice in a doc. Until
+ * `lockwire link` runs, such a claim isn't being checked at all.
+ */
+export declare function findUnlinkedMarkers(lockfile: Lockfile, docs: readonly string[], readMarkers: (doc: string) => Promise<DocMarker[] | null>): Promise<UnlinkedMarker[]>;
+/** Claims written in the docs about this file (or symbol) that no anchor backs. */
+export declare function unlinkedFor(repoRoot: string, config: LockwireConfig, path: string, symbol?: string): Promise<UnlinkedMarker[]>;
 export declare function check(repoRoot: string, config: LockwireConfig, onlyPaths?: readonly string[], opts?: {
     write?: boolean;
     actor?: Actor;

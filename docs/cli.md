@@ -101,7 +101,8 @@ single-hash would flag 3 · lockwire flagged 1 · noise −66.7%
       "excerpt": "`createSession` takes a `UserId`…" }
   ],
   "unlinked": [
-    { "doc": "CLAUDE.md", "line": 12, "target": "src/auth/session.ts#createSession", "reason": "not linked yet" }
+    { "doc": "CLAUDE.md", "line": 12, "target": "src/auth/session.ts#createSession", "reason": "not linked yet",
+      "excerpt": "`createSession` takes a `UserId`…" }
   ]
 }
 ```

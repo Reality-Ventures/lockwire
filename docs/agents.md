@@ -79,8 +79,8 @@ Any agent that reads `npx skills add`-style skills (Cursor, Gemini CLI, OpenCode
 
 | Tool | Arguments | Purpose |
 |---|---|---|
-| `lockwire_claims_for` | `path`, `symbol?` | What does documentation assert about this code? Call before editing. |
-| `lockwire_refs` | `path`, `symbol?` | Reverse lookup — which claims reference this code. |
+| `lockwire_claims_for` | `path`, `symbol?` | What does documentation assert about this code? Call before editing. Returns `{ anchors, unlinked }`: the claims lockwire is checking, and claims written in a doc about this code that nobody has linked yet (with their sentence), which nothing is checking. |
+| `lockwire_refs` | `path`, `symbol?` | Reverse lookup — which anchors reference this code. Anchors only; for unlinked claims too, use `lockwire_claims_for`. |
 | `lockwire_status` | `scope?` | Current status of every anchor, optionally glob-filtered. |
 | `lockwire_verify` | `doc` | Check one document before committing it: returns `{ anchors, unlinked }` — its anchors' statuses, and any markers in it that no anchor backs. |
 | `lockwire_history` | `ref` | Ledger timeline for an anchor id, a `path#symbol`, or a doc — the query nothing else in this space has. |
