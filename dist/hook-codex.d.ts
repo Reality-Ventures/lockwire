@@ -4,5 +4,5 @@
  * apply_patch hook emission (fixed in Codex 0.123.0) vs deny enforcement (still version-dependent,
  * openai/codex#27833). lockwire's advisory default only needs emission, which is solid.
  */
-export declare function runCodexHook(adapter: "codex-pre" | "codex-post", repoRoot: string): Promise<void>;
+export declare function runCodexHook(adapter: "codex-pre" | "codex-post", fallbackRoot: string): Promise<void>;
 //# sourceMappingURL=hook-codex.d.ts.map

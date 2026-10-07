@@ -1,11 +1,13 @@
 import { readConfig } from "./config.js";
 import {
+  absoluteHookPath,
   buildAdvisoryText,
   claimsForPath,
   logHookError,
   normalizeTouchedPath,
   readStdinJson,
   reportDriftFor,
+  resolveHookRoot,
 } from "./hook-common.js";
 
 /**
@@ -14,15 +16,18 @@ import {
  */
 export async function runClaudeHook(
   adapter: "claude-pre" | "claude-post",
-  repoRoot: string,
+  fallbackRoot: string,
 ): Promise<void> {
+  let repoRoot = fallbackRoot;
   try {
     const input = await readStdinJson();
     if (!input.tool_name || !["Edit", "Write"].includes(input.tool_name)) return;
     const filePath = input.tool_input?.file_path;
     if (!filePath) return;
 
-    const touched = normalizeTouchedPath(repoRoot, filePath);
+    const absPath = absoluteHookPath(input, filePath);
+    repoRoot = resolveHookRoot(fallbackRoot, input, absPath);
+    const touched = normalizeTouchedPath(repoRoot, absPath);
     const config = await readConfig(repoRoot);
 
     if (adapter === "claude-pre") {

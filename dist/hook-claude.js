@@ -1,10 +1,11 @@
 import { readConfig } from "./config.js";
-import { buildAdvisoryText, claimsForPath, logHookError, normalizeTouchedPath, readStdinJson, reportDriftFor, } from "./hook-common.js";
+import { absoluteHookPath, buildAdvisoryText, claimsForPath, logHookError, normalizeTouchedPath, readStdinJson, reportDriftFor, resolveHookRoot, } from "./hook-common.js";
 /**
  * Claude Code PreToolUse/PostToolUse adapter. Fail-open by contract: any exception here must
  * result in exit 0 with no output, never a broken tool call. See LOCKWIRE-SPEC.md §6.
  */
-export async function runClaudeHook(adapter, repoRoot) {
+export async function runClaudeHook(adapter, fallbackRoot) {
+    let repoRoot = fallbackRoot;
     try {
         const input = await readStdinJson();
         if (!input.tool_name || !["Edit", "Write"].includes(input.tool_name))
@@ -12,7 +13,9 @@ export async function runClaudeHook(adapter, repoRoot) {
         const filePath = input.tool_input?.file_path;
         if (!filePath)
             return;
-        const touched = normalizeTouchedPath(repoRoot, filePath);
+        const absPath = absoluteHookPath(input, filePath);
+        repoRoot = resolveHookRoot(fallbackRoot, input, absPath);
+        const touched = normalizeTouchedPath(repoRoot, absPath);
         const config = await readConfig(repoRoot);
         if (adapter === "claude-pre") {
             const anchors = await claimsForPath(repoRoot, touched);

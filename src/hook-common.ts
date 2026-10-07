@@ -1,7 +1,8 @@
 import { appendFile, mkdir } from "node:fs/promises";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { check, refs } from "./actions.js";
 import { readConfig } from "./config.js";
-import { toPosix, toRepoRelative } from "./repo.js";
+import { toPosix, toRepoRelative, tryFindRepoRoot } from "./repo.js";
 import type { Anchor, LockwireConfig } from "./types.js";
 
 export interface HookInput {
@@ -17,6 +18,23 @@ export async function readStdinJson(): Promise<HookInput> {
   const raw = Buffer.concat(chunks).toString("utf8").trim();
   if (!raw) return {};
   return JSON.parse(raw) as HookInput;
+}
+
+/**
+ * Hooks run with the session's cwd, which may be a folder *above* the repo (e.g. a workspace holding
+ * several projects). The edited file is the better signal: walk up from it, then from the hook's
+ * reported cwd, and only then fall back to the root derived from the process cwd.
+ */
+export function absoluteHookPath(input: HookInput, filePath: string): string {
+  return isAbsolute(filePath) || /^[A-Za-z]:[\\/]/.test(filePath)
+    ? filePath
+    : resolve(input.cwd ?? process.cwd(), filePath);
+}
+
+export function resolveHookRoot(fallbackRoot: string, input: HookInput, absPath: string): string {
+  return (
+    tryFindRepoRoot(dirname(absPath)) ?? tryFindRepoRoot(input.cwd ?? process.cwd()) ?? fallbackRoot
+  );
 }
 
 /** Windows delivers `C:\project\src\index.ts`; hooks compare against posix, repo-relative anchor targets. */

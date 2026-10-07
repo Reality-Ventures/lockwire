@@ -1,11 +1,13 @@
 import { readConfig } from "./config.js";
 import {
+  absoluteHookPath,
   buildAdvisoryText,
   claimsForPath,
   logHookError,
   normalizeTouchedPath,
   readStdinJson,
   reportDriftFor,
+  resolveHookRoot,
 } from "./hook-common.js";
 
 /**
@@ -16,8 +18,9 @@ import {
  */
 export async function runCodexHook(
   adapter: "codex-pre" | "codex-post",
-  repoRoot: string,
+  fallbackRoot: string,
 ): Promise<void> {
+  let repoRoot = fallbackRoot;
   try {
     const input = await readStdinJson();
     // Codex file edits arrive as `apply_patch`; the patch body is on tool_input.command per the
@@ -29,7 +32,9 @@ export async function runCodexHook(
     const filePath = match?.[1]?.trim();
     if (!filePath) return;
 
-    const touched = normalizeTouchedPath(repoRoot, filePath);
+    const absPath = absoluteHookPath(input, filePath);
+    repoRoot = resolveHookRoot(fallbackRoot, input, absPath);
+    const touched = normalizeTouchedPath(repoRoot, absPath);
     const config = await readConfig(repoRoot);
 
     if (adapter === "codex-pre") {

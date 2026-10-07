@@ -28,17 +28,21 @@ export function toPosix(p) {
 export function toRepoRelative(repoRoot, absPath) {
     return toPosix(relative(repoRoot, absPath));
 }
-/** Walk up from `startDir` looking for `lockwire.lock`, falling back to a `.git` directory, falling back to cwd. */
-export function findRepoRoot(startDir) {
+/** Walk up from `startDir` looking for `lockwire.lock` or a `.git` entry; undefined if neither exists above it. */
+export function tryFindRepoRoot(startDir) {
     let dir = resolve(startDir);
     while (true) {
         if (existsSync(join(dir, "lockwire.lock")) || existsSync(join(dir, ".git")))
             return dir;
         const parent = dirname(dir);
         if (parent === dir)
-            return resolve(startDir);
+            return undefined;
         dir = parent;
     }
+}
+/** Walk up from `startDir` looking for `lockwire.lock`, falling back to a `.git` directory, falling back to `startDir`. */
+export function findRepoRoot(startDir) {
+    return tryFindRepoRoot(startDir) ?? resolve(startDir);
 }
 /**
  * A small, dependency-free glob matcher: `**` matches across path separators, `*` matches within

@@ -1,1 +1,1 @@
-{"version":3,"file":"hook-codex.d.ts","sourceRoot":"","sources":["../src/hook-codex.ts"],"names":[],"mappings":"AAUA;;;;;GAKG;AACH,wBAAsB,YAAY,CAChC,OAAO,EAAE,WAAW,GAAG,YAAY,EACnC,QAAQ,EAAE,MAAM,GACf,OAAO,CAAC,IAAI,CAAC,CAwCf"}
+{"version":3,"file":"hook-codex.d.ts","sourceRoot":"","sources":["../src/hook-codex.ts"],"names":[],"mappings":"AAYA;;;;;GAKG;AACH,wBAAsB,YAAY,CAChC,OAAO,EAAE,WAAW,GAAG,YAAY,EACnC,YAAY,EAAE,MAAM,GACnB,OAAO,CAAC,IAAI,CAAC,CA2Cf"}

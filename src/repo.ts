@@ -29,15 +29,20 @@ export function toRepoRelative(repoRoot: string, absPath: string): string {
   return toPosix(relative(repoRoot, absPath));
 }
 
-/** Walk up from `startDir` looking for `lockwire.lock`, falling back to a `.git` directory, falling back to cwd. */
-export function findRepoRoot(startDir: string): string {
+/** Walk up from `startDir` looking for `lockwire.lock` or a `.git` entry; undefined if neither exists above it. */
+export function tryFindRepoRoot(startDir: string): string | undefined {
   let dir = resolve(startDir);
   while (true) {
     if (existsSync(join(dir, "lockwire.lock")) || existsSync(join(dir, ".git"))) return dir;
     const parent = dirname(dir);
-    if (parent === dir) return resolve(startDir);
+    if (parent === dir) return undefined;
     dir = parent;
   }
+}
+
+/** Walk up from `startDir` looking for `lockwire.lock`, falling back to a `.git` directory, falling back to `startDir`. */
+export function findRepoRoot(startDir: string): string {
+  return tryFindRepoRoot(startDir) ?? resolve(startDir);
 }
 
 /**
