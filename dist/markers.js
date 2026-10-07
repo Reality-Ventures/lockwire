@@ -69,8 +69,14 @@ export function scanMarkers(text) {
 /** Consumes blank lines, then the block that follows: a fenced code block in full, or lines up to the next blank line. */
 function captureFollowingBlock(lines, startIdx) {
     let i = startIdx;
-    while (i < lines.length && (lines[i] ?? "").trim() === "")
+    // Skip blanks and any further markers stacked above the same sentence: they all bind it, and none
+    // of them is part of it.
+    while (i < lines.length) {
+        const t = (lines[i] ?? "").trim();
+        if (t !== "" && !MARKER_RE.test(t))
+            break;
         i++;
+    }
     if (i >= lines.length)
         return { claimLine: -1, text: "" };
     const firstLine = lines[i] ?? "";
@@ -89,8 +95,12 @@ function captureFollowingBlock(lines, startIdx) {
         }
     }
     else {
-        while (i < lines.length && (lines[i] ?? "").trim() !== "") {
-            collected.push(lines[i] ?? "");
+        // A marker line ends the paragraph: it belongs to the next claim, not this one.
+        while (i < lines.length) {
+            const l = lines[i] ?? "";
+            if (l.trim() === "" || MARKER_RE.test(l.trim()))
+                break;
+            collected.push(l);
             i++;
         }
     }

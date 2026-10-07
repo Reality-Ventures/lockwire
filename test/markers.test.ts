@@ -85,3 +85,51 @@ describe("scanMarkers and fenced code blocks", () => {
     expect(m?.claimExcerpt).toContain("export function alpha");
   });
 });
+
+describe("scanMarkers with stacked and adjacent markers", () => {
+  const m = (sym: string) => `<!-- lockwire src/a.ts#${sym} sig -->`;
+  const SENTENCE = "`alpha` and `beta` are related.";
+
+  it("every marker stacked above one sentence binds that sentence, and none is part of it", () => {
+    const found = scanMarkers([m("alpha"), m("beta"), m("gamma"), SENTENCE].join("\n"));
+    expect(found.map((x) => x.target.symbol)).toEqual(["alpha", "beta", "gamma"]);
+    for (const x of found) {
+      expect(x.claimExcerpt).toBe(SENTENCE);
+      expect(x.claimLine).toBe(4);
+      expect(x.claimHash).toBe(found[0]?.claimHash);
+    }
+  });
+
+  it("blank lines between stacked markers don't change that", () => {
+    const found = scanMarkers([m("alpha"), "", m("beta"), "", SENTENCE].join("\n"));
+    expect(found.map((x) => x.claimExcerpt)).toEqual([SENTENCE, SENTENCE]);
+  });
+
+  it("stamping one marker's id never changes another marker's claim hash", () => {
+    const before = scanMarkers([m("alpha"), m("beta"), SENTENCE].join("\n"));
+    const after = scanMarkers([stampMarkerLine(m("alpha"), "AAAA1111"), m("beta"), SENTENCE].join("\n"));
+    expect(after[1]?.claimHash).toBe(before[1]?.claimHash);
+    expect(after[0]?.claimHash).toBe(before[0]?.claimHash);
+  });
+
+  it("a marker directly after a paragraph (no blank line) ends that paragraph and starts the next claim", () => {
+    const found = scanMarkers(["<!-- lockwire src/a.ts#alpha sig -->", "First claim.", m("beta"), "Second claim."].join("\n"));
+    expect(found.map((x) => x.claimExcerpt)).toEqual(["First claim.", "Second claim."]);
+  });
+
+  it("stacked markers with no sentence beneath them bind nothing", () => {
+    expect(scanMarkers([m("alpha"), m("beta")].join("\n"))).toEqual([]);
+    expect(scanMarkers([m("alpha"), m("beta"), ""].join("\n"))).toEqual([]);
+  });
+
+  it("stacked markers above a fenced code block claim all capture the whole block", () => {
+    const found = scanMarkers([m("alpha"), m("beta"), "```ts", "const x = 1;", "```"].join("\n"));
+    expect(found).toHaveLength(2);
+    for (const x of found) expect(x.claimExcerpt).toContain("const x = 1;");
+  });
+
+  it("a single marker's claim is unchanged by the stacking logic", () => {
+    const [x] = scanMarkers(["# T", "", m("alpha"), "Line one", "line two.", "", "Other."].join("\n"));
+    expect(x?.claimExcerpt).toBe("Line one line two.");
+  });
+});

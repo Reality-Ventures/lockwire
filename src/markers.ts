@@ -87,7 +87,13 @@ function captureFollowingBlock(
   startIdx: number,
 ): { claimLine: number; text: string } {
   let i = startIdx;
-  while (i < lines.length && (lines[i] ?? "").trim() === "") i++;
+  // Skip blanks and any further markers stacked above the same sentence: they all bind it, and none
+  // of them is part of it.
+  while (i < lines.length) {
+    const t = (lines[i] ?? "").trim();
+    if (t !== "" && !MARKER_RE.test(t)) break;
+    i++;
+  }
   if (i >= lines.length) return { claimLine: -1, text: "" };
 
   const firstLine = lines[i] ?? "";
@@ -105,8 +111,11 @@ function captureFollowingBlock(
       if (l.trim().startsWith(fence)) break;
     }
   } else {
-    while (i < lines.length && (lines[i] ?? "").trim() !== "") {
-      collected.push(lines[i] ?? "");
+    // A marker line ends the paragraph: it belongs to the next claim, not this one.
+    while (i < lines.length) {
+      const l = lines[i] ?? "";
+      if (l.trim() === "" || MARKER_RE.test(l.trim())) break;
+      collected.push(l);
       i++;
     }
   }

@@ -18,6 +18,8 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Fixed
 
+- Two markers stacked above one sentence swallowed each other: the first marker's claim text included the second marker's line, so stamping an id into the second changed the first's claim hash and `check` then reported it as `drifted (claim)`. Stacked markers now all bind the sentence beneath them, and a marker line ends the paragraph above it. A stacked anchor stamped by an earlier version shows claim drift once; `lockwire link <doc>` re-stamps it.
+- `summary.relocated` was hardcoded to 0. It now counts the anchors relocated in that run (text output adds `· N relocated` when non-zero).
 - Stamping a marker (`lockwire link`) rewrote every CRLF in the doc to LF, producing a whole-file diff on Windows. Each line's own terminator is now preserved, and stamping changes only the marker line. Stamping also keeps whatever precedes the marker on its line, such as list-item indentation or a leading BOM.
 - A UTF-8 BOM at the start of `lockwire.lock`, `.lockwire/config.json` or `.lockwire/ledger.jsonl` (Windows editors and PowerShell add one) made it unreadable. All three are now read with the BOM stripped.
 - Path arguments weren't normalized: `lockwire link ./CLAUDE.md` stored the doc as `./CLAUDE.md` (never matching hooks or MCP lookups), `link guide.md` from `docs/` failed, and `check ./src/x.ts` scoped nothing and exited 0 on drift. CLI paths now resolve against the cwd and are stored repo-relative; `link` rejects a doc outside the repo. The MCP tools accept absolute and `./` paths the same way.

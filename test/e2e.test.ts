@@ -330,3 +330,52 @@ describe("regressions found by adversarial testing", () => {
     expect(linkedResult.skipped[0]?.reason).toMatch(/supports TypeScript/);
   });
 });
+
+describe("stacked markers and the relocated count", () => {
+  const actor = { type: "human" as const };
+
+  it("two markers over one sentence both link, stay fresh after linking, and both flag when it's edited", async () => {
+    const repo = await tempRepo();
+    const sentence = "`createSession` returns a `Session`.";
+    const doc = (s: string) =>
+      `# A\n\n<!-- lockwire src/session.ts#createSession sig -->\n<!-- lockwire src/session.ts path,body -->\n${s}\n`;
+    await writeFile(join(repo, "CLAUDE.md"), doc(sentence), "utf8");
+
+    expect((await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor)).created).toBe(2);
+    expect((await check(repo, DEFAULT_CONFIG)).summary).toMatchObject({ anchors: 2, drifted: 0 });
+
+    // Re-linking the now-stamped doc is stable too.
+    expect((await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor)).refreshed).toBe(2);
+    expect((await check(repo, DEFAULT_CONFIG)).summary.drifted).toBe(0);
+
+    await writeFile(join(repo, "CLAUDE.md"), doc("Totally different."), "utf8");
+    const { results } = await check(repo, DEFAULT_CONFIG);
+    expect(results.every((r) => r.claimChanged)).toBe(true);
+  });
+
+  it("summary.relocated counts relocations in that run only, with and without accompanying drift", async () => {
+    const repo = await tempRepo();
+    await writeFile(
+      join(repo, "CLAUDE.md"),
+      "# A\n\n<!-- lockwire src/session.ts#createSession sig,body -->\nIt creates.\n",
+      "utf8",
+    );
+    await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    expect((await check(repo, DEFAULT_CONFIG)).summary.relocated).toBe(0);
+
+    await writeFile(join(repo, "src", "session.ts"), SESSION_TS.replace("createSession", "openSession"), "utf8");
+    const first = await check(repo, DEFAULT_CONFIG);
+    expect(first.summary.relocated).toBe(1);
+    expect(first.summary.fresh).toBe(1);
+    expect((await check(repo, DEFAULT_CONFIG)).summary.relocated).toBe(0); // already relinked
+
+    // A rename that also changes the body still counts as relocated, and as drifted.
+    await writeFile(
+      join(repo, "src", "session.ts"),
+      SESSION_TS.replace("createSession", "startSession").replace("mint(userId)", "forge(userId)"),
+      "utf8",
+    );
+    const second = await check(repo, DEFAULT_CONFIG);
+    expect(second.summary).toMatchObject({ relocated: 1, drifted: 1 });
+  });
+});

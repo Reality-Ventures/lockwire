@@ -212,6 +212,7 @@ export async function check(repoRoot, config, onlyPaths) {
     const now = new Date().toISOString();
     const results = [];
     let current = lockfile;
+    let relocatedCount = 0;
     const docMarkers = new Map();
     async function markersIn(doc) {
         if (!docMarkers.has(doc)) {
@@ -341,6 +342,7 @@ export async function check(repoRoot, config, onlyPaths) {
                         fingerprints: reResolved?.fingerprints ?? anchor.fingerprints,
                         status: "fresh",
                     };
+                relocatedCount++;
                 current = upsertAnchor(current, relocated);
                 await appendEvent(repoRoot, {
                     ts: now,
@@ -471,7 +473,7 @@ export async function check(repoRoot, config, onlyPaths) {
         anchors: results.length,
         fresh: results.filter((r) => r.status === "fresh").length,
         drifted: results.filter((r) => r.status === "drifted").length,
-        relocated: 0,
+        relocated: relocatedCount,
         orphaned: results.filter((r) => r.status === "orphaned").length,
         waived: results.filter((r) => r.status === "waived").length,
         superseded: results.filter((r) => r.status === "superseded").length,
