@@ -3,6 +3,12 @@ export declare function walkFiles(repoRoot: string, exclude?: readonly string[])
 /** Windows delivers hook paths with backslashes even under Git Bash. Normalize before any comparison. */
 export declare function toPosix(p: string): string;
 export declare function toRepoRelative(repoRoot: string, absPath: string): string;
+/**
+ * Turns a user-supplied path (`./CLAUDE.md`, `guide.md` typed from `docs/`, an absolute path) into
+ * the repo-relative posix form anchors are stored and compared in. Relative inputs resolve against
+ * `cwd`. A result starting with `..` means the path is outside the repo.
+ */
+export declare function toRepoPath(repoRoot: string, input: string, cwd?: string): string;
 /** Walk up from `startDir` looking for `lockwire.lock` or a `.git` entry; undefined if neither exists above it. */
 export declare function tryFindRepoRoot(startDir: string): string | undefined;
 /** Walk up from `startDir` looking for `lockwire.lock`, falling back to a `.git` directory, falling back to `startDir`. */

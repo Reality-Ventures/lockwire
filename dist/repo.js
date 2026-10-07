@@ -28,6 +28,14 @@ export function toPosix(p) {
 export function toRepoRelative(repoRoot, absPath) {
     return toPosix(relative(repoRoot, absPath));
 }
+/**
+ * Turns a user-supplied path (`./CLAUDE.md`, `guide.md` typed from `docs/`, an absolute path) into
+ * the repo-relative posix form anchors are stored and compared in. Relative inputs resolve against
+ * `cwd`. A result starting with `..` means the path is outside the repo.
+ */
+export function toRepoPath(repoRoot, input, cwd = process.cwd()) {
+    return toRepoRelative(repoRoot, resolve(cwd, input));
+}
 /** Walk up from `startDir` looking for `lockwire.lock` or a `.git` entry; undefined if neither exists above it. */
 export function tryFindRepoRoot(startDir) {
     let dir = resolve(startDir);

@@ -20,7 +20,7 @@ import { runClaudeHook } from "./hook-claude.js";
 import { runCodexHook } from "./hook-codex.js";
 import { readLedger, verifyLedger } from "./ledger.js";
 import { readLockfile, writeLockfile } from "./lockfile.js";
-import { findRepoRoot, isPathGitignored } from "./repo.js";
+import { findRepoRoot, isPathGitignored, toRepoPath } from "./repo.js";
 import type { Tier } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
 
@@ -84,10 +84,14 @@ async function main() {
 
     case "link": {
       const config = await readConfig(repoRoot);
-      const [doc, target] = positional;
-      if (!doc) throw new Error("usage: lockwire link <doc.md> [target] [--tiers a,b]");
+      const [docArg, target] = positional;
+      if (!docArg) throw new Error("usage: lockwire link <doc.md> [target] [--tiers a,b]");
+      const doc = toRepoPath(repoRoot, docArg);
+      if (doc.startsWith(".."))
+        throw new Error(`${docArg} is outside the repository (${repoRoot})`);
       if (target) {
-        const [path, symbol] = target.split("#");
+        const [rawPath, symbol] = target.split("#");
+        const path = rawPath ? toRepoPath(repoRoot, rawPath) : rawPath;
         const tiers =
           typeof flags.tiers === "string"
             ? (flags.tiers.split(",") as Tier[])
@@ -118,7 +122,8 @@ async function main() {
 
     case "check": {
       const config = await readConfig(repoRoot);
-      const changedOnly = positional.length > 0 ? positional : undefined;
+      const changedOnly =
+        positional.length > 0 ? positional.map((p) => toRepoPath(repoRoot, p)) : undefined;
       const result = await check(repoRoot, config, changedOnly);
       const fmt = typeof flags.format === "string" ? flags.format : "text";
       const out =
@@ -149,8 +154,8 @@ async function main() {
     case "refs": {
       const [target] = positional;
       if (!target) throw new Error("usage: lockwire refs <path>[#symbol]");
-      const [path, symbol] = target.split("#");
-      const anchors = await refs(repoRoot, path!, symbol);
+      const [rawPath, symbol] = target.split("#");
+      const anchors = await refs(repoRoot, toRepoPath(repoRoot, rawPath ?? ""), symbol);
       for (const a of anchors)
         console.log(`${a.doc ?? "(lockfile-only)"}:${a.claim?.line ?? "-"}  ${a.id}`);
       break;
@@ -170,6 +175,10 @@ async function main() {
       const resolution = flags.resolution;
       if (!id || typeof resolution !== "string")
         throw new Error("usage: lockwire ack <id> --resolution updated|superseded|false-positive");
+      if (!["updated", "superseded", "false-positive"].includes(resolution))
+        throw new Error(
+          `unknown resolution "${resolution}": use updated, superseded or false-positive`,
+        );
       const config = await readConfig(repoRoot);
       await ack(
         repoRoot,

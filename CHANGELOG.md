@@ -18,6 +18,9 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Fixed
 
+- Path arguments weren't normalized: `lockwire link ./CLAUDE.md` stored the doc as `./CLAUDE.md` (never matching hooks or MCP lookups), `link guide.md` from `docs/` failed, and `check ./src/x.ts` scoped nothing and exited 0 on drift. CLI paths now resolve against the cwd and are stored repo-relative; `link` rejects a doc outside the repo. The MCP tools accept absolute and `./` paths the same way.
+- Markers inside fenced code blocks (``` or ~~~, including indented ones) were treated as live bindings, so documentation examples got stamped. They are now ignored. An anchor whose marker sits inside a fence is reported as orphaned (marker removed).
+- `lockwire ack --resolution` accepted any value; it now rejects anything but `updated`, `superseded` or `false-positive`.
 - A function renamed *and* changed in a bound tier (say `body`) was re-stamped as fresh, hiding the change. Relocation now re-stamps only `sig` and reports any other moved bound tier as drift.
 - A marker copy-pasted into a second doc silently took over the original's anchor, so the original sentence stopped being checked. If the original doc still holds the marker, the copy now gets its own id.
 - `waive --expires` accepted any string, and an unparseable one never expired. It now requires a real ISO date in the future, and an unparseable expiry already in a lockfile counts as expired.

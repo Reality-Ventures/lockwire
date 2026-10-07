@@ -5,6 +5,7 @@ import { z } from "zod";
 import { ack, check, history, linkDoc, refs, status, waive } from "./actions.js";
 import { readConfig } from "./config.js";
 import { lockfilePath } from "./lockfile.js";
+import { toRepoPath } from "./repo.js";
 
 function text(payload: unknown) {
   return {
@@ -47,7 +48,10 @@ export function createServer(repoRoot: string): McpServer {
       },
     },
     async ({ path, symbol }) =>
-      text(missingLockNote(repoRoot) ?? (await refs(repoRoot, path, symbol))),
+      text(
+        missingLockNote(repoRoot) ??
+          (await refs(repoRoot, toRepoPath(repoRoot, path, repoRoot), symbol)),
+      ),
   );
 
   server.registerTool(
@@ -64,7 +68,10 @@ export function createServer(repoRoot: string): McpServer {
       },
     },
     async ({ path, symbol }) =>
-      text(missingLockNote(repoRoot) ?? (await refs(repoRoot, path, symbol))),
+      text(
+        missingLockNote(repoRoot) ??
+          (await refs(repoRoot, toRepoPath(repoRoot, path, repoRoot), symbol)),
+      ),
   );
 
   server.registerTool(
@@ -100,9 +107,10 @@ export function createServer(repoRoot: string): McpServer {
         openWorldHint: false,
       },
     },
-    async ({ doc }) => {
+    async ({ doc: docArg }) => {
       const note = missingLockNote(repoRoot);
       if (note) return text(note);
+      const doc = toRepoPath(repoRoot, docArg, repoRoot);
       const config = await readConfig(repoRoot);
       const result = await check(repoRoot, config);
       return text(result.results.filter((r) => r.anchor.doc === doc));
@@ -146,7 +154,7 @@ export function createServer(repoRoot: string): McpServer {
       text(
         await linkDoc(
           repoRoot,
-          doc,
+          toRepoPath(repoRoot, doc, repoRoot),
           await readConfig(repoRoot),
           { type: "ai", tool: { name: "mcp" } },
           reviewed === undefined ? {} : { reviewed },

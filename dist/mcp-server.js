@@ -5,6 +5,7 @@ import { z } from "zod";
 import { ack, check, history, linkDoc, refs, status, waive } from "./actions.js";
 import { readConfig } from "./config.js";
 import { lockfilePath } from "./lockfile.js";
+import { toRepoPath } from "./repo.js";
 function text(payload) {
     return {
         content: [
@@ -38,7 +39,8 @@ export function createServer(repoRoot) {
             idempotentHint: true,
             openWorldHint: false,
         },
-    }, async ({ path, symbol }) => text(missingLockNote(repoRoot) ?? (await refs(repoRoot, path, symbol))));
+    }, async ({ path, symbol }) => text(missingLockNote(repoRoot) ??
+        (await refs(repoRoot, toRepoPath(repoRoot, path, repoRoot), symbol))));
     server.registerTool("lockwire_refs", {
         title: "Reverse lookup",
         description: "Which documentation claims reference this file or symbol.",
@@ -49,7 +51,8 @@ export function createServer(repoRoot) {
             idempotentHint: true,
             openWorldHint: false,
         },
-    }, async ({ path, symbol }) => text(missingLockNote(repoRoot) ?? (await refs(repoRoot, path, symbol))));
+    }, async ({ path, symbol }) => text(missingLockNote(repoRoot) ??
+        (await refs(repoRoot, toRepoPath(repoRoot, path, repoRoot), symbol))));
     server.registerTool("lockwire_status", {
         title: "Anchor status",
         description: "Current status of every anchor, optionally filtered by a glob scope.",
@@ -75,10 +78,11 @@ export function createServer(repoRoot) {
             idempotentHint: true,
             openWorldHint: false,
         },
-    }, async ({ doc }) => {
+    }, async ({ doc: docArg }) => {
         const note = missingLockNote(repoRoot);
         if (note)
             return text(note);
+        const doc = toRepoPath(repoRoot, docArg, repoRoot);
         const config = await readConfig(repoRoot);
         const result = await check(repoRoot, config);
         return text(result.results.filter((r) => r.anchor.doc === doc));
@@ -107,7 +111,7 @@ export function createServer(repoRoot) {
             idempotentHint: false,
             openWorldHint: false,
         },
-    }, async ({ doc, reviewed }) => text(await linkDoc(repoRoot, doc, await readConfig(repoRoot), { type: "ai", tool: { name: "mcp" } }, reviewed === undefined ? {} : { reviewed })));
+    }, async ({ doc, reviewed }) => text(await linkDoc(repoRoot, toRepoPath(repoRoot, doc, repoRoot), await readConfig(repoRoot), { type: "ai", tool: { name: "mcp" } }, reviewed === undefined ? {} : { reviewed })));
     server.registerTool("lockwire_ack", {
         title: "Acknowledge drift",
         description: "Record that drift was handled and re-stamp the anchor's fingerprints.",

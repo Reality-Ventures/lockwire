@@ -1,13 +1,35 @@
 import { fingerprint } from "./hash.js";
 import { ALL_TIERS } from "./types.js";
 const MARKER_RE = /^<!--\s*lockwire\s+(.+?)\s*-->\s*$/;
+const FENCE_RE = /^\s*(`{3,}|~{3,})(.*)$/;
 const TIER_SET = new Set(ALL_TIERS);
 /** Scans a markdown document's text for `<!-- lockwire <target> [tiers] [id=<id>] -->` markers. */
 export function scanMarkers(text) {
     const lines = text.split(/\r?\n/);
     const markers = [];
+    // Fenced code blocks hold examples (this repo's own docs show markers inside ```markdown), not
+    // live bindings, so nothing between an opening and closing fence is scanned.
+    let fence = null;
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i] ?? "";
+        const fenceLine = FENCE_RE.exec(line);
+        if (fenceLine) {
+            const run = fenceLine[1] ?? "";
+            const char = run[0] ?? "`";
+            const rest = fenceLine[2] ?? "";
+            if (fence) {
+                if (char === fence.char && run.length >= fence.len && rest.trim() === "")
+                    fence = null;
+                continue;
+            }
+            // A backtick fence's info string can't contain backticks, or it is inline code, not a fence.
+            if (!(char === "`" && rest.includes("`"))) {
+                fence = { char, len: run.length };
+                continue;
+            }
+        }
+        if (fence)
+            continue;
         const m = MARKER_RE.exec(line.trim());
         if (!m)
             continue;

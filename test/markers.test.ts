@@ -44,3 +44,44 @@ describe("scanMarkers", () => {
     expect(scanMarkers("<!-- just a comment -->\ntext")).toHaveLength(0);
   });
 });
+
+describe("scanMarkers and fenced code blocks", () => {
+  const M = "<!-- lockwire src/a.ts#alpha sig -->";
+  const ids = (doc: string) => scanMarkers(doc).map((m) => m.target.symbol);
+
+  it("ignores markers inside backtick and tilde fences", () => {
+    expect(ids(["```markdown", M, "claim.", "```"].join("\n"))).toEqual([]);
+    expect(ids(["~~~", M, "claim.", "~~~"].join("\n"))).toEqual([]);
+  });
+
+  it("picks the real marker back up after the fence closes", () => {
+    const doc = ["```md", M, "example.", "```", "", M.replace("alpha", "beta"), "Real claim."].join("\n");
+    expect(ids(doc)).toEqual(["beta"]);
+  });
+
+  it("only a fence of the same character and at least the same length closes it", () => {
+    const doc = ["````md", "```", M, "still inside", "```", "````", M.replace("alpha", "beta"), "Real."].join("\n");
+    expect(ids(doc)).toEqual(["beta"]);
+    expect(ids(["```", "~~~", M, "inside.", "```"].join("\n"))).toEqual([]);
+  });
+
+  it("treats an indented fence (inside a list item) as a fence", () => {
+    expect(ids(["- item", "  ```md", `  ${M}`, "  claim.", "  ```"].join("\n"))).toEqual([]);
+  });
+
+  it("does not mistake inline triple-backtick code for a fence", () => {
+    const doc = ["Use ```code``` inline.", "", M, "Real claim."].join("\n");
+    expect(ids(doc)).toEqual(["alpha"]);
+  });
+
+  it("an unclosed fence swallows the rest of the document, as in CommonMark", () => {
+    expect(ids(["```md", M, "claim."].join("\n"))).toEqual([]);
+  });
+
+  it("a marker outside a fence can still have a fenced code block as its claim", () => {
+    const doc = [M, "```ts", "export function alpha(): void {}", "```"].join("\n");
+    const [m] = scanMarkers(doc);
+    expect(m?.target.symbol).toBe("alpha");
+    expect(m?.claimExcerpt).toContain("export function alpha");
+  });
+});
