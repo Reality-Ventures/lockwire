@@ -14,7 +14,14 @@ import { scanMarkers } from "./markers.js";
 import { findRepoRoot, isPathGitignored, toRepoPath } from "./repo.js";
 import { DEFAULT_CONFIG } from "./types.js";
 /** Flags that never take a value, so `check --changed src/a.ts` leaves `src/a.ts` a path. */
-const BOOLEAN_FLAGS = new Set(["changed", "staged", "no-write", "reviewed", "json"]);
+const BOOLEAN_FLAGS = new Set([
+    "changed",
+    "staged",
+    "no-write",
+    "reviewed",
+    "json",
+    "fail-on-unlinked",
+]);
 function parseFlags(args) {
     const positional = [];
     const flags = {};
@@ -141,7 +148,7 @@ async function main() {
             const out = fmt === "json"
                 ? formatJson(result, null)
                 : fmt === "github"
-                    ? formatGithub(result)
+                    ? formatGithub(result, { failOnUnlinked: Boolean(flags["fail-on-unlinked"]) })
                     : formatText(result);
             console.log(out);
             if (fmt === "text" && !flags["no-write"] && result.summary.relocated > 0) {
@@ -152,7 +159,10 @@ async function main() {
                 ];
                 console.log(`note: ${result.summary.relocated} anchor${result.summary.relocated === 1 ? "" : "s"} relocated to a renamed symbol; the doc marker still names the old one. Run \`lockwire link ${docs.length === 1 ? docs[0] : "<doc>"}\` to update it.`);
             }
-            process.exitCode = result.summary.drifted > 0 || result.summary.orphaned > 0 ? 1 : 0;
+            const failed = result.summary.drifted > 0 ||
+                result.summary.orphaned > 0 ||
+                (Boolean(flags["fail-on-unlinked"]) && result.summary.unlinked > 0);
+            process.exitCode = failed ? 1 : 0;
             break;
         }
         case "status": {

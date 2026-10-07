@@ -42,7 +42,7 @@ Creates a **lockfile-only** anchor: a whole-doc-to-code binding with no inline m
 lockwire link docs/auth.md src/auth/session.ts#createSession --tiers sig,deps
 ```
 
-## `lockwire check [paths…] [--changed | --staged] [--base <ref>] [--no-write] [--format text|json|github]`
+## `lockwire check [paths…] [--changed | --staged] [--base <ref>] [--no-write] [--fail-on-unlinked] [--format text|json|github]`
 
 Recomputes fingerprints for every anchor, compares against the stored value for each bound tier, updates `lockwire.lock`, appends ledger events for any status transition, and prints a report. Exits `1` if any examined anchor is `drifted` or `orphaned`, `0` otherwise.
 
@@ -51,6 +51,14 @@ Scoping — anchors outside the scope aren't examined, aren't reported, and can'
 - `paths…` — anchors whose target **or doc** is one of these paths. Paths resolve against your cwd.
 - `--changed` — anchors on files this branch touched: everything that differs from the merge base with the base branch (committed, uncommitted and untracked). Both sides of a rename count, so a moved file orphans its anchors. A doc edit counts too, which is how a rewritten claim gets caught. The base is `--base <ref>`, else `origin/$GITHUB_BASE_REF` in a pull-request job, else `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. If none exists, `check` stops and says so instead of guessing.
 - `--staged` — only what's staged for the next commit (for a pre-commit hook).
+
+**Unlinked markers.** A marker only protects a claim once `lockwire link` has turned it into an anchor. `check` also reads the docs the config selects (a scoped run reads only the docs in its scope) and lists any marker that no anchor backs: one with no `id=`, an `id=` that matches no anchor, an id that really belongs to the marker in another doc (a copy-paste), or an id used twice in one doc. They are a warning, shown under "Unlinked markers" and counted in the summary line, and they don't change the exit code — unless you pass `--fail-on-unlinked`, which makes them fail the run (and turns the `github` format's `::warning` into `::error`).
+
+```
+Unlinked markers (no anchor backs them, so these claims are not being checked):
+  CLAUDE.md:12  src/auth/session.ts#createSession  not linked yet
+Run `lockwire link CLAUDE.md` to link them.
+```
 
 `--no-write` is a dry run: same report and exit code, but `lockwire.lock` and the ledger are left exactly as they were. Use it in CI and pre-commit so a gate never dirties the working tree.
 
@@ -84,12 +92,16 @@ single-hash would flag 3 · lockwire flagged 1 · noise −66.7%
   "checkedAt": "2026-09-25T10:00:00Z",
   "summary": {
     "anchors": 41, "fresh": 38, "drifted": 2, "relocated": 0, "orphaned": 1, "waived": 0, "superseded": 0,
+    "unlinked": 1,
     "noise": { "singleHashWouldFlag": 14, "tieredFlagged": 3, "reductionPercent": 78.6 }
   },
   "anchors": [
     { "id": "k7q2m9xv", "doc": "CLAUDE.md", "line": 3, "target": "src/auth/session.ts#createSession",
       "status": "drifted", "driftedTiers": ["sig"], "claimChanged": false,
       "excerpt": "`createSession` takes a `UserId`…" }
+  ],
+  "unlinked": [
+    { "doc": "CLAUDE.md", "line": 12, "target": "src/auth/session.ts#createSession", "reason": "not linked yet" }
   ]
 }
 ```

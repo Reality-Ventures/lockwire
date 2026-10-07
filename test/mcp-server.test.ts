@@ -111,9 +111,25 @@ describe("MCP server tools", () => {
       name: "lockwire_verify",
       arguments: { doc: "CLAUDE.md" },
     });
-    const results = JSON.parse(firstText(result as never));
-    expect(results).toHaveLength(1);
-    expect(results[0].status).toBe("fresh");
+    const { anchors, unlinked } = JSON.parse(firstText(result as never));
+    expect(anchors).toHaveLength(1);
+    expect(anchors[0].status).toBe("fresh");
+    expect(unlinked).toEqual([]);
+  });
+
+  it("lockwire_verify also reports markers in that doc that no anchor backs", async () => {
+    await writeFile(
+      join(repo, "NOTES.md"),
+      "# N\n\n<!-- lockwire src/session.ts#createSession sig -->\nA claim nobody linked.\n",
+      "utf8",
+    );
+    const client = await connectedClient(repo);
+    const result = await client.callTool({ name: "lockwire_verify", arguments: { doc: "NOTES.md" } });
+    const { anchors, unlinked } = JSON.parse(firstText(result as never));
+    expect(anchors).toEqual([]);
+    expect(unlinked).toEqual([
+      { doc: "NOTES.md", line: 3, target: "src/session.ts#createSession", reason: "not linked yet" },
+    ]);
   });
 
   it("lockwire_history returns the anchor.created event", async () => {

@@ -31,9 +31,16 @@ export function formatText(result: CheckResult): string {
     lines.push("");
   }
 
+  if (result.unlinked.length > 0) {
+    lines.push("Unlinked markers (no anchor backs them, so these claims are not being checked):");
+    for (const u of result.unlinked) lines.push(`  ${u.doc}:${u.line}  ${u.target}  ${u.reason}`);
+    const docs = [...new Set(result.unlinked.map((u) => u.doc))];
+    lines.push(`Run \`lockwire link ${docs.length === 1 ? docs[0] : "<doc>"}\` to link them.`, "");
+  }
+
   const { summary } = result;
   lines.push(
-    `${summary.anchors} anchor${summary.anchors === 1 ? "" : "s"} · ${summary.fresh} ok · ${summary.drifted} drifted · ${summary.orphaned} orphaned${summary.relocated > 0 ? ` · ${summary.relocated} relocated` : ""}`,
+    `${summary.anchors} anchor${summary.anchors === 1 ? "" : "s"} · ${summary.fresh} ok · ${summary.drifted} drifted · ${summary.orphaned} orphaned${summary.relocated > 0 ? ` · ${summary.relocated} relocated` : ""}${summary.unlinked > 0 ? ` · ${summary.unlinked} unlinked` : ""}`,
   );
   lines.push(
     `single-hash would flag ${summary.noise.singleHashWouldFlag} · lockwire flagged ${summary.noise.tieredFlagged} · noise −${summary.noise.reductionPercent}%`,
@@ -60,11 +67,12 @@ export function formatJson(result: CheckResult, repo: string | null): string {
         claimChanged: r.claimChanged ?? false,
         excerpt: r.anchor.claim?.excerpt ?? null,
       })),
+    unlinked: result.unlinked,
   };
   return JSON.stringify(payload, null, 2);
 }
 
-export function formatGithub(result: CheckResult): string {
+export function formatGithub(result: CheckResult, opts: { failOnUnlinked?: boolean } = {}): string {
   const lines: string[] = [];
   for (const r of result.results.filter((x) => !x.skipped)) {
     if (r.status !== "drifted" && r.status !== "orphaned") continue;
@@ -81,6 +89,12 @@ export function formatGithub(result: CheckResult): string {
           ? `lockwire: the claim text bound to "${target}" was edited — re-verify it against the code, then run lockwire link`
           : `lockwire: "${target}" drifted on ${what} — this claim may be stale`;
     lines.push(`::error file=${file},line=${line}::${message}`);
+  }
+  for (const u of result.unlinked) {
+    const level = opts.failOnUnlinked ? "error" : "warning";
+    lines.push(
+      `::${level} file=${u.doc},line=${u.line}::lockwire: the claim bound to "${u.target}" isn't linked (${u.reason}), so nothing checks it — run lockwire link ${u.doc}`,
+    );
   }
   return lines.join("\n");
 }

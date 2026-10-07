@@ -214,6 +214,8 @@ describe.skipIf(!has)("JSON samples have the shape the code emits", () => {
     const dir = await scratch({
       "src/auth/session.ts": SESSION_V1,
       "CLAUDE.md": "# A\n\n<!-- lockwire src/auth/session.ts#createSession sig -->\n`createSession` takes a `UserId`.\n",
+      // a marker nobody has linked, so the sample's `unlinked` entries have something to match
+      "NOTES.md": "# N\n\n<!-- lockwire src/auth/session.ts#createSession sig -->\nAn unlinked claim.\n",
     });
     cli(dir, ["link", "CLAUDE.md"]);
     await writeFile(join(dir, "src/auth/session.ts"), SESSION_NEW_SIG, "utf8");

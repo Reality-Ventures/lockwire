@@ -6,6 +6,9 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Added
 
+- `lockwire check` now warns about **unlinked markers**: markers in the docs the config selects that no anchor backs — no `id=` yet, an id that matches no anchor, an id that belongs to the marker in another doc (a copy-paste), or an id used twice in one doc. Until `lockwire link` runs, such a claim isn't protected at all, and nothing said so. They're listed under "Unlinked markers", counted in the summary line (only when non-zero, so existing output is unchanged), included in the JSON (`unlinked`, and `summary.unlinked`) and as `::warning` annotations, and they don't change the exit code unless you pass `--fail-on-unlinked`. A scoped run (`check <paths>`, `--changed`, `--staged`, and the editing hooks) looks only at docs in scope and never walks the tree, so the hooks stay fast: the PostToolUse hook takes ~30 ms in a repo with 400 docs, and an unscoped `check` over them 60 ms.
+- The `PostToolUse` hook now tells the agent when its edit to a doc left markers that no anchor backs, and to run `lockwire link <doc>`.
+
 - `lockwire link` with no document links every doc the config selects (`docs` / `exclude`) that contains markers, and prints a line per doc plus a total; `--reviewed` passes through. Docs without markers are left byte-for-byte alone, and markers inside fenced code blocks are examples, not bindings. Naming a doc still ignores the config. `docs` and `exclude` were read by the config loader and written to every `config.json` but nothing in the CLI used them (`discoverDocs` was imported and never called); now they do something.
 - `docs/cli.md` documents every config key and a test keeps that table identical to the keys `init` writes, plus a test that fails if a config key exists that nothing in `src/` reads.
 
@@ -26,6 +29,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Changed
 
+- The MCP tool `lockwire_verify` now returns `{ anchors, unlinked }` instead of a bare array, so an agent verifying a doc also learns about markers in it that no anchor backs.
 - Removed the `sigIndex` field from `FileSymbols`: it was built on every extraction and read by nothing (relocation matches by symbol path). Library consumers of `extractFileSymbols` that read it should use `bySymbolPath`.
 - **Symbol extraction now follows scope.** Anchors can bind to module-level functions and classes, class members, and classes nested directly in a class body (`Outer.Inner`, `Outer.Inner.method`). Anything declared inside a function is local and no longer registered. Before, a nested `function helper` overwrote a top-level `helper` in the symbol table (so an anchor on the real one silently tracked the inner one), and a class declared inside a method leaked `Outer.m`. Measured over 1,557 TS/JS/Python files (24,524 symbols: this repo, `node_modules`, the Python standard library): 94.9% of symbols keep identical fingerprints; 1,226 (5%) were local symbols and are no longer extracted, so an anchor on one now reports `orphaned`; 20 nested classes/methods gained correct dotted paths. I checked the removals against a column-0 heuristic and found no legitimate top-level symbol lost.
 - **Paren-less single-parameter arrows** (`x => x + 1`) now include the parameter in `sig` and alias it as a local in `body`. Anchors on such a function (22 of 24,524 in the corpus) drift once on `sig` and `body`; re-link them.

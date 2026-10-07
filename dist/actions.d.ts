@@ -54,15 +54,25 @@ export interface CheckSummary {
     orphaned: number;
     waived: number;
     superseded: number;
+    /** Markers in the scanned docs that no anchor backs: those claims aren't being checked. */
+    unlinked: number;
     noise: {
         singleHashWouldFlag: number;
         tieredFlagged: number;
         reductionPercent: number;
     };
 }
+/** A marker in a doc that isn't backed by an anchor, so the claim under it is not being checked. */
+export interface UnlinkedMarker {
+    doc: string;
+    line: number;
+    target: string;
+    reason: string;
+}
 export interface CheckResult {
     summary: CheckSummary;
     results: AnchorCheckResult[];
+    unlinked: UnlinkedMarker[];
 }
 export declare function check(repoRoot: string, config: LockwireConfig, onlyPaths?: readonly string[], opts?: {
     write?: boolean;

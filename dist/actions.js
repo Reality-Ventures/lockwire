@@ -531,6 +531,46 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
     // Anchors outside a scoped run weren't examined: they stay in `results` (callers like the hooks
     // look anchors up there) but must not count towards the summary or the exit code.
     const examined = results.filter((r) => !r.skipped);
+    // The other thing a claim can be: not bound at all. A marker with no `id=`, or whose id no anchor
+    // backs, is silently unprotected until `lockwire link` runs. Scoped runs (hooks, --changed) only
+    // look at docs in scope and never walk the tree.
+    const unlinked = [];
+    const isScannedDoc = (p) => matchesAny(p, config.docs) &&
+        !matchesAny(p, config.exclude) &&
+        !p.split("/").some((seg) => seg === ".git" || seg === "node_modules" || seg === ".lockwire");
+    const docsToScan = onlyPaths
+        ? [...new Set(onlyPaths)].filter(isScannedDoc)
+        : await discoverDocs(repoRoot, config);
+    for (const doc of docsToScan.sort()) {
+        const markers = await markersIn(doc);
+        if (!markers)
+            continue;
+        const seenIds = new Set();
+        for (const m of markers) {
+            let reason = null;
+            const anchor = m.id ? lockfile.anchors.find((a) => a.id === m.id) : undefined;
+            if (!m.id)
+                reason = "not linked yet";
+            else if (!anchor)
+                reason = `id ${m.id} matches no anchor`;
+            else if (seenIds.has(m.id))
+                reason = `id ${m.id} appears twice in this doc`;
+            else if (anchor.doc && anchor.doc !== doc) {
+                const stillThere = (await markersIn(anchor.doc))?.some((x) => x.id === m.id);
+                if (stillThere)
+                    reason = `id ${m.id} belongs to the marker in ${anchor.doc}`;
+            }
+            if (m.id)
+                seenIds.add(m.id);
+            if (reason)
+                unlinked.push({
+                    doc,
+                    line: m.line,
+                    target: `${m.target.path}${m.target.symbol ? `#${m.target.symbol}` : ""}`,
+                    reason,
+                });
+        }
+    }
     const singleHashWouldFlag = examined.filter((r) => r.singleHashWouldFlag).length;
     // The noise comparison is about code fingerprints; a claim-only flag has no single-hash counterpart.
     const tieredFlagged = examined.filter((r) => (r.status === "drifted" || r.status === "orphaned") &&
@@ -546,9 +586,10 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
         orphaned: examined.filter((r) => r.status === "orphaned").length,
         waived: examined.filter((r) => r.status === "waived").length,
         superseded: examined.filter((r) => r.status === "superseded").length,
+        unlinked: unlinked.length,
         noise: { singleHashWouldFlag, tieredFlagged, reductionPercent },
     };
-    return { summary, results };
+    return { summary, results, unlinked };
 }
 export async function discoverDocs(repoRoot, config) {
     return walkFiles(repoRoot, config.exclude).filter((p) => matchesAny(p, config.docs));

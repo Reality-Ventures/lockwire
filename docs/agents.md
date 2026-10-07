@@ -34,7 +34,7 @@ How lockwire wires into Claude Code, Codex, other agents via skills, and MCP.
 }
 ```
 
-No anchors touch the file → both hooks emit nothing and exit `0`. This is the common case; the hook is silent almost all the time.
+If the edit was to a doc that has markers no anchor backs, `PostToolUse` also says so ("…has markers that no anchor backs, so those claims are not being checked") and tells the agent to run `lockwire link <doc>`. No anchors touch the file → both hooks emit nothing and exit `0`. This is the common case; the hook is silent almost all the time.
 
 ### Hook modes
 
@@ -82,7 +82,7 @@ Any agent that reads `npx skills add`-style skills (Cursor, Gemini CLI, OpenCode
 | `lockwire_claims_for` | `path`, `symbol?` | What does documentation assert about this code? Call before editing. |
 | `lockwire_refs` | `path`, `symbol?` | Reverse lookup — which claims reference this code. |
 | `lockwire_status` | `scope?` | Current status of every anchor, optionally glob-filtered. |
-| `lockwire_verify` | `doc` | Check one document's anchors before committing it. |
+| `lockwire_verify` | `doc` | Check one document before committing it: returns `{ anchors, unlinked }` — its anchors' statuses, and any markers in it that no anchor backs. |
 | `lockwire_history` | `ref` | Ledger timeline for an anchor id, a `path#symbol`, or a doc — the query nothing else in this space has. |
 | `lockwire_link` | `doc`, `reviewed?` | Scan a doc for markers and stamp fresh fingerprints. |
 | `lockwire_ack` | `anchor`, `resolution`, `note?` | Record that drift was handled. |

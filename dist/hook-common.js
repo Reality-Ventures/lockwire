@@ -67,21 +67,30 @@ export async function reportDriftFor(repoRoot, touchedPath, actor) {
     const result = await check(repoRoot, config, [touchedPath], actor ? { actor } : {});
     const relevant = result.results.filter((r) => (r.anchor.target.path === touchedPath || r.anchor.doc === touchedPath) &&
         (r.status === "drifted" || r.status === "orphaned"));
-    if (relevant.length === 0)
+    const unlinked = result.unlinked.filter((u) => u.doc === touchedPath);
+    if (relevant.length === 0 && unlinked.length === 0)
         return { text: "", anyDrift: false };
-    const lines = relevant.map((r) => {
-        const target = `${r.anchor.target.path}${r.anchor.target.symbol ? `#${r.anchor.target.symbol}` : ""}`;
-        const what = [...r.driftedTiers, ...(r.claimChanged ? ["claim"] : [])];
-        return `- ${r.anchor.doc ?? "(lockfile-only)"} on ${target} is now ${r.status}${what.length ? ` (${what.join(",")})` : ""}`;
-    });
-    return {
-        text: [
+    const sections = [];
+    if (relevant.length > 0) {
+        const lines = relevant.map((r) => {
+            const target = `${r.anchor.target.path}${r.anchor.target.symbol ? `#${r.anchor.target.symbol}` : ""}`;
+            const what = [...r.driftedTiers, ...(r.claimChanged ? ["claim"] : [])];
+            return `- ${r.anchor.doc ?? "(lockfile-only)"} on ${target} is now ${r.status}${what.length ? ` (${what.join(",")})` : ""}`;
+        });
+        sections.push([
             `lockwire: this edit drifted documentation claims:`,
             ...lines,
             `Update the doc and run \`lockwire link <doc>\`, or \`lockwire ack\`/\`lockwire waive\` if this is expected.`,
-        ].join("\n"),
-        anyDrift: true,
-    };
+        ].join("\n"));
+    }
+    if (unlinked.length > 0) {
+        sections.push([
+            `lockwire: ${touchedPath} has markers that no anchor backs, so those claims are not being checked:`,
+            ...unlinked.map((u) => `- line ${u.line}: ${u.target} (${u.reason})`),
+            `Run \`lockwire link ${touchedPath}\` to link them.`,
+        ].join("\n"));
+    }
+    return { text: sections.join("\n\n"), anyDrift: true };
 }
 export async function logHookError(repoRoot, adapter, err) {
     try {

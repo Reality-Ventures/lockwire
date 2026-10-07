@@ -115,7 +115,10 @@ export function createServer(repoRoot: string): McpServer {
       const result = await check(repoRoot, config, undefined, {
         actor: { type: "ai", tool: { name: "mcp" } },
       });
-      return text(result.results.filter((r) => r.anchor.doc === doc));
+      return text({
+        anchors: result.results.filter((r) => r.anchor.doc === doc),
+        unlinked: result.unlinked.filter((u) => u.doc === doc),
+      });
     },
   );
 
