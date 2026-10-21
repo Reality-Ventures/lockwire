@@ -17,5 +17,17 @@ export declare function changedFiles(repoRoot: string, opts?: ChangedOptions): s
  * not cached: a long-lived process (the MCP server) outlives many commits.
  */
 export declare function headCommit(repoRoot: string): string | null;
+/**
+ * A file's text at `commit`, read from git, or null if git, the commit or the file isn't there.
+ * `commit` comes from the lockfile, which anyone can edit, so only a plain hex object name is passed
+ * to git (anything else could be read as an option); `path` must already be contained in the repo.
+ */
+export declare function fileAtCommit(repoRoot: string, commit: string, path: string): string | null;
+/**
+ * Commits that changed `path`: those after `from` (exclusive) when given and known, oldest first —
+ * the stamped version is usually committed soon after — otherwise all of them, newest first (the
+ * stamped version is usually recent). Capped, since each one is read and parsed.
+ */
+export declare function commitsTouching(repoRoot: string, path: string, from: string | null, limit?: number): string[];
 export {};
 //# sourceMappingURL=changed.d.ts.map

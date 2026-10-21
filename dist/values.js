@@ -181,6 +181,8 @@ const BEFORE_SIGN = /[\s([{=:~≈]/;
  */
 export function claimNumbers(text) {
     const out = [];
+    /** Where each single number sits in the text, for the range pass below (null for list items). */
+    const spans = [];
     // The whole token at once (digits, commas between digits, any dotted parts), so a regex can never
     // backtrack into the integer part of `12.5ms`.
     const re = /(?<![\w.])(\d(?:\d|,(?=\d))*(?:\.\d+)*|\.\d+)(?:[eE]([-+]?\d+)(?![\w]))?/g;
@@ -230,7 +232,25 @@ export function claimNumbers(text) {
                 scale,
                 percent: Boolean(pct) && one,
             });
+            spans.push(one ? { start: signed ? start - 1 : start, end, bare: !suffix && !pct } : null);
         }
+    }
+    // In a range the unit is usually written once, on the upper bound: "25.4–35.2%", "(0.08–17%)",
+    // "1.2–3.4B", LaTeX "15--29\%". A bare lower bound takes the upper bound's percent and magnitude.
+    // Right to left, so a chain like "10–20–30%" passes it all the way down.
+    for (let i = out.length - 2; i >= 0; i--) {
+        const a = spans[i];
+        const b = spans[i + 1];
+        const lo = out[i];
+        const hi = out[i + 1];
+        if (!a || !b || !lo || !hi || !a.bare)
+            continue;
+        if (!/^\s*(?:–|—|‒|−|-|--|to)\s*$/.test(text.slice(a.end, b.start)))
+            continue;
+        if (!hi.percent && hi.scale === 1)
+            continue;
+        out[i] = { ...lo, percent: hi.percent, scale: hi.scale, value: lo.value * hi.scale };
+        a.bare = false;
     }
     return out;
 }

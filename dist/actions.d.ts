@@ -17,6 +17,16 @@ export declare function resolveTarget(repoRoot: string, target: {
     symbol?: string;
 }, config: LockwireConfig): Promise<TargetResolution | null>;
 /**
+ * {@link resolveTarget} on given file contents rather than the file on disk — used to fingerprint a
+ * target as it was at an earlier commit. `source` is the bound symbol's declaration as written.
+ */
+export declare function resolveTargetInText(target: {
+    path: string;
+    symbol?: string;
+}, content: string, config: LockwireConfig): Promise<TargetResolution & {
+    source?: string;
+}>;
+/**
  * Same-file rename detection: if a symbol vanished but exactly one other symbol in the file has the
  * same signature apart from its name, relink to it. `sig` fingerprints include the symbol's name,
  * so each candidate is re-rendered under the missing symbol's old name before comparing -- that
@@ -48,6 +58,10 @@ export declare function inapplicableTiersReason(target: {
 export declare function linkDoc(repoRoot: string, docPath: string, config: LockwireConfig, actor: Actor, opts?: {
     reviewed?: boolean;
     commit?: string | null;
+    /** Only (re-)stamp the markers this accepts; leave the rest of the doc alone. */
+    only?: (marker: DocMarker) => boolean;
+    /** Why, for the ledger (e.g. an agent's account of what it checked). */
+    note?: string;
 }): Promise<LinkResult>;
 /** `lockwire link <doc> <target>` — a lockfile-only anchor with no inline marker, for whole-doc-to-file bindings. */
 export declare function linkLockfileOnly(repoRoot: string, docPath: string, target: {
@@ -141,6 +155,8 @@ export declare function unlinkedForWithin(repoRoot: string, config: LockwireConf
     index: IndexStats;
     state: IndexState;
 }>;
+/** Whether `path` is one of `scope`, or inside one of them that is a directory (`docs` or `docs/`). */
+export declare function inPathScope(path: string, scope: readonly string[]): boolean;
 export declare function check(repoRoot: string, config: LockwireConfig, onlyPaths?: readonly string[], opts?: {
     write?: boolean;
     actor?: Actor;

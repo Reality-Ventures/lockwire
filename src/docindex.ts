@@ -132,7 +132,7 @@ async function readIndexFile(repoRoot: string): Promise<IndexData | null> {
 /** Keeps the cache (and hook.log) out of git: `.lockwire/` itself is committed. Never overwrites the user's. */
 export async function ensureLockwireGitignore(repoRoot: string): Promise<void> {
   const path = join(repoRoot, ".lockwire", ".gitignore");
-  const wanted = ["cache/", "hook.log"];
+  const wanted = ["cache/", "hook.log", "lock"];
   let current = "";
   try {
     current = await readFile(path, "utf8");

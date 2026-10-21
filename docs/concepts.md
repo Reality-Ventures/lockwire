@@ -61,6 +61,8 @@ The paper reports a lower bound of 0.18.
 - **Stamping.** `link` refuses to bind a sentence that already states a different value, because that would record a false claim as the baseline. `ack` re-stamps the stored value but can't make a wrong sentence right; fix the sentence, or `waive` it with an expiry.
 - **When there's nothing to compare.** A sentence that states no number ("the bound comes from the canonical run"), a lockfile-only anchor, or a value that isn't a number or string falls back to plain fingerprint drift: any change to the value flags it.
 
+**Ranges.** The unit is usually written once, on the upper bound — `(24.0–33.6%)`, `(0.08–17%)`, `1.2–3.4B`, LaTeX `15--29\%` — so a bare lower bound joined to it by a range dash (`–`, `—`, `-`, `--`, or "to") takes the upper bound's percent or magnitude.
+
 One sentence, one value per marker: a sentence passes if *any* number in it matches, so a range like "0.18–0.24" needs two stacked markers, one per bound, to check both.
 
 ## The claim side of the binding

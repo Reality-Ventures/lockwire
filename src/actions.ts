@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { headCommit } from "./changed.js";
 import { type IndexState, type IndexStats, loadDocIndex } from "./docindex.js";
@@ -13,6 +13,7 @@ import {
   readLockfile,
   removeAnchor,
   upsertAnchor,
+  writeFileAtomic,
   writeLockfile,
 } from "./lockfile.js";
 import {
@@ -68,17 +69,29 @@ export async function resolveTarget(
   const absPath = resolveInsideRepo(repoRoot, target.path);
   if (!absPath) throw new Error(outsideRepoMessage(target.path));
   if (!existsSync(absPath)) return null;
+  return resolveTargetInText(target, await readFile(absPath, "utf8"), config);
+}
 
+/**
+ * {@link resolveTarget} on given file contents rather than the file on disk — used to fingerprint a
+ * target as it was at an earlier commit. `source` is the bound symbol's declaration as written.
+ */
+export async function resolveTargetInText(
+  target: { path: string; symbol?: string },
+  content: string,
+  config: LockwireConfig,
+): Promise<TargetResolution & { source?: string }> {
   // A data file (JSON, LaTeX macros): the target is a value in it, not a symbol.
   const dataFormat = dataFormatOf(target.path);
   if (dataFormat) {
-    const text = stripBom(await readFile(absPath, "utf8"));
+    const text = stripBom(content);
     const pathFp = fingerprint(target.path);
     const empty = { path: pathFp, sig: "", body: "", deps: "", value: "" };
     if (!target.symbol)
       return {
         found: true,
         fingerprints: { ...empty, body: fingerprint(wholeFileContent(text, dataFormat)) },
+        source: text,
       };
     const v = resolveValue(text, dataFormat, target.symbol);
     if (!v.found) return { found: false, fingerprints: empty };
@@ -86,6 +99,7 @@ export async function resolveTarget(
       found: true,
       fingerprints: { ...empty, value: fingerprint(valueFingerprintInput(v.value)) },
       value: { raw: v.value, display: v.display ?? "" },
+      source: v.display ?? "",
     };
   }
 
@@ -95,7 +109,6 @@ export async function resolveTarget(
       `lockwire supports TypeScript, TSX, JavaScript, and Python source, and values in JSON and LaTeX (.tex) files — "${target.path}" is none of these`,
     );
 
-  const content = await readFile(absPath, "utf8");
   const parser = await parserFor(lang);
   const tree = parser.parse(content);
   if (!tree) throw new Error(`failed to parse ${target.path}`);
@@ -116,6 +129,7 @@ export async function resolveTarget(
         deps: fingerprintSet(symbol.deps),
       },
       symbols,
+      source: symbol.sourceText,
     };
   }
 
@@ -129,6 +143,7 @@ export async function resolveTarget(
       deps: fingerprintSet(whole.deps),
     },
     symbols,
+    source: content,
   };
 }
 
@@ -196,7 +211,14 @@ export async function linkDoc(
   docPath: string,
   config: LockwireConfig,
   actor: Actor,
-  opts: { reviewed?: boolean; commit?: string | null } = {},
+  opts: {
+    reviewed?: boolean;
+    commit?: string | null;
+    /** Only (re-)stamp the markers this accepts; leave the rest of the doc alone. */
+    only?: (marker: DocMarker) => boolean;
+    /** Why, for the ledger (e.g. an agent's account of what it checked). */
+    note?: string;
+  } = {},
 ): Promise<LinkResult> {
   const absDoc = resolveInsideRepo(repoRoot, docPath);
   if (!absDoc) throw new Error(outsideRepoMessage(docPath));
@@ -213,6 +235,11 @@ export async function linkDoc(
   const commit = opts.commit ?? headCommit(repoRoot);
 
   for (const marker of markers) {
+    if (opts.only && !opts.only(marker)) {
+      // Not ours to stamp, but it still counts when spotting a duplicated id further down.
+      if (marker.id) idsSeenInDoc.add(marker.id);
+      continue;
+    }
     const targetLabel = `${marker.target.path}${marker.target.symbol ? `#${marker.target.symbol}` : ""}`;
     let existing = marker.id ? current.anchors.find((a) => a.id === marker.id) : undefined;
 
@@ -348,6 +375,7 @@ export async function linkDoc(
         anchor: id,
         actor,
         commit,
+        ...(opts.note ? { note: opts.note } : {}),
       });
     } else {
       result.refreshed++;
@@ -365,15 +393,21 @@ export async function linkDoc(
         anchor: id,
         actor,
         commit,
-        note: retargeted
-          ? `re-stamped via link; marker retargeted ${targetLabel} -> ${target.path}${target.symbol ? `#${target.symbol}` : ""}`
-          : "re-stamped via link",
+        note: [
+          retargeted
+            ? `re-stamped via link; marker retargeted ${targetLabel} -> ${target.path}${target.symbol ? `#${target.symbol}` : ""}`
+            : "re-stamped via link",
+          opts.note,
+        ]
+          .filter(Boolean)
+          .join("; "),
       });
     }
   }
 
-  await writeLockfile(repoRoot, current);
-  if (docChanged) await writeFile(absDoc, parts.join(""), "utf8");
+  // Nothing stamped (everything skipped or refused): leave the lockfile exactly as it was.
+  if (result.created + result.refreshed > 0) await writeLockfile(repoRoot, current);
+  if (docChanged) await writeFileAtomic(absDoc, parts.join(""));
   return result;
 }
 
@@ -585,6 +619,42 @@ export async function unlinkedForWithin(
   };
 }
 
+/** Whether `path` is one of `scope`, or inside one of them that is a directory (`docs` or `docs/`). */
+export function inPathScope(path: string, scope: readonly string[]): boolean {
+  return scope.some((p) => {
+    const dir = p.replace(/\/+$/, "");
+    return (
+      path === p ||
+      path === dir ||
+      (dir !== "" && path.startsWith(`${dir}/`)) ||
+      dir === "" ||
+      dir === "."
+    );
+  });
+}
+
+/** The docs a scoped run looks at: listed docs, plus the selected docs inside any listed directory. */
+async function docsInScope(
+  repoRoot: string,
+  config: LockwireConfig,
+  scope: readonly string[],
+): Promise<string[]> {
+  const out = new Set(scope.filter((p) => isScannedDoc(p, config)));
+  const dirs = scope.filter((p) => {
+    if (p.endsWith("/") || p === "" || p === ".") return true;
+    const abs = resolveInsideRepo(repoRoot, p);
+    try {
+      return abs !== null && statSync(abs).isDirectory();
+    } catch {
+      return false;
+    }
+  });
+  if (dirs.length > 0)
+    for (const doc of await discoverDocs(repoRoot, config))
+      if (inPathScope(doc, dirs)) out.add(doc);
+  return [...out];
+}
+
 export async function check(
   repoRoot: string,
   config: LockwireConfig,
@@ -614,8 +684,8 @@ export async function check(
     let anchor = stored;
     const inScope =
       !onlyPaths ||
-      onlyPaths.includes(anchor.target.path) ||
-      (anchor.doc !== null && onlyPaths.includes(anchor.doc));
+      inPathScope(anchor.target.path, onlyPaths) ||
+      (anchor.doc !== null && inPathScope(anchor.doc, onlyPaths));
     if (!inScope) {
       results.push({
         anchor,
@@ -934,7 +1004,7 @@ export async function check(
   // The other thing a claim can be: not bound at all (see findUnlinkedMarkers). Scoped runs (hooks,
   // --changed) only look at docs in scope and never walk the tree.
   const docsToScan = onlyPaths
-    ? [...new Set(onlyPaths)].filter((p) => isScannedDoc(p, config))
+    ? await docsInScope(repoRoot, config, onlyPaths)
     : await discoverDocs(repoRoot, config);
   const unlinked = await findUnlinkedMarkers(lockfile, docsToScan, markersIn);
 

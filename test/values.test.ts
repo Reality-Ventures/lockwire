@@ -435,3 +435,35 @@ describe.skipIf(!existsSync(CLI))("value anchors through the CLI and hooks", () 
     expect(cli(dir, ["check", "--no-write"]).status).toBe(1); // no sentence, so any change is drift
   });
 });
+
+describe("ranges: the unit written once on the upper bound applies to the lower bound too", () => {
+  // Shapes from a real research report: a rerun moved these values and the agent's correct fix used
+  // exactly this notation; without this rule every lower bound was refused as wrong.
+  const n = (s: string) => claimNumbers(s).map((x) => [x.value, x.percent, x.scale]);
+
+  it("a percent on the upper bound marks the lower bound as a percent", () => {
+    expect(n("the share is 28.8% (24.0–33.6%).")).toEqual([[28.8, true, 1], [24, true, 1], [33.6, true, 1]]);
+    expect(n("| without Neotoma | 30 | 1 | 3.3% (0.08–17%) |").slice(3)).toEqual([[0.08, true, 1], [17, true, 1]]);
+    expect(n(String.raw`95\% CI 15--29\%`).slice(1)).toEqual([[15, true, 1], [29, true, 1]]);
+    expect(n("from 10 to 20%")).toEqual([[10, true, 1], [20, true, 1]]);
+    expect(n("10–20–30%")).toEqual([[10, true, 1], [20, true, 1], [30, true, 1]]);
+  });
+
+  it("a magnitude on the upper bound scales the lower bound", () => {
+    expect(n("between 1.2–3.4B rows")).toEqual([[1.2e9, false, 1e9], [3.4e9, false, 1e9]]);
+  });
+
+  it("only a bare lower bound joined by a range dash inherits; anything else is left alone", () => {
+    expect(n("ages 18–65 and 40% of them")).toEqual([[18, false, 1], [65, false, 1], [40, true, 1]]);
+    expect(n("0.18-0.24")).toEqual([[0.18, false, 1], [0.24, false, 1]]);
+    expect(n("5ms–20%")).toEqual([[5, false, 1], [20, true, 1]]); // the lower bound has its own unit
+    expect(n("3, then 20%")).toEqual([[3, false, 1], [20, true, 1]]);
+  });
+
+  it("so a correct range checks clean against fractions, and a wrong lower bound is still caught", () => {
+    const holds = (claim: string, v: number) => checkClaimAgainstValue(claim, v).matches;
+    expect(holds("the share is 28.8% (24.0–33.6%).", 0.23999547511312216)).toBe(true);
+    expect(holds("| without Neotoma | 30 | 1 | 3.3% (0.08–17%) |", 0.0008435709266304788)).toBe(true);
+    expect(holds("the share is 28.8% (25.0–33.6%).", 0.23999547511312216)).toBe(false);
+  });
+});

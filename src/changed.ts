@@ -92,3 +92,35 @@ export function changedFiles(repoRoot: string, opts: ChangedOptions = {}): strin
 export function headCommit(repoRoot: string): string | null {
   return tryGit(gitRunner(repoRoot), ["rev-parse", "--short", "HEAD"])?.trim() || null;
 }
+
+/**
+ * A file's text at `commit`, read from git, or null if git, the commit or the file isn't there.
+ * `commit` comes from the lockfile, which anyone can edit, so only a plain hex object name is passed
+ * to git (anything else could be read as an option); `path` must already be contained in the repo.
+ */
+export function fileAtCommit(repoRoot: string, commit: string, path: string): string | null {
+  if (!/^[0-9a-f]{4,64}$/i.test(commit)) return null;
+  return tryGit(gitRunner(repoRoot), ["show", `${commit}:./${path}`]);
+}
+
+/**
+ * Commits that changed `path`: those after `from` (exclusive) when given and known, oldest first —
+ * the stamped version is usually committed soon after — otherwise all of them, newest first (the
+ * stamped version is usually recent). Capped, since each one is read and parsed.
+ */
+export function commitsTouching(
+  repoRoot: string,
+  path: string,
+  from: string | null,
+  limit = 200,
+): string[] {
+  const git = gitRunner(repoRoot);
+  const known =
+    from !== null &&
+    /^[0-9a-f]{4,64}$/i.test(from) &&
+    tryGit(git, ["cat-file", "-e", `${from}^{commit}`]) !== null;
+  const out = known
+    ? tryGit(git, ["rev-list", "--reverse", `${from}..HEAD`, "--", `./${path}`])
+    : tryGit(git, ["rev-list", "HEAD", "--", `./${path}`]);
+  return out ? lines(out).slice(0, limit) : [];
+}

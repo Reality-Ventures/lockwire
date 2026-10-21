@@ -50,7 +50,7 @@ Recomputes fingerprints for every anchor, compares against the stored value for 
 
 Scoping — anchors outside the scope aren't examined, aren't reported, and can't fail the run:
 
-- `paths…` — anchors whose target **or doc** is one of these paths. Paths resolve against your cwd.
+- `paths…` — anchors whose target **or doc** is one of these paths, or is inside one of them that is a directory. Paths resolve against your cwd.
 - `--changed` — anchors on files this branch touched: everything that differs from the merge base with the base branch (committed, uncommitted and untracked). Both sides of a rename count, so a moved file orphans its anchors. A doc edit counts too, which is how a rewritten claim gets caught. The base is `--base <ref>`, else `origin/$GITHUB_BASE_REF` in a pull-request job, else `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. If none exists, `check` stops and says so instead of guessing.
 - `--staged` — only what's staged for the next commit (for a pre-commit hook).
 
@@ -121,6 +121,27 @@ single-hash would flag 3 · lockwire flagged 1 · noise −66.7%
 | `hook.mode` | `"advisory"` | What the `PreToolUse` hook does: `advisory`, `ask` or `deny` — see [agents.md](agents.md#hook-modes). |
 | `hook.maxClaimsInContext` | `8` | The most claims the hooks inject for one edit; the rest are summarised as "…and N more". |
 | `hook.unlinkedClaims` | `true` | Whether the `PreToolUse` hook also tells the agent about claims in the docs about the file it's editing that nobody has linked. It reads a cached [doc index](#lockwire-index---rebuild) kept fresh by `stat`ing the docs, within a 750 ms budget; set `false` to switch it off entirely. |
+
+## `lockwire tasks [paths…] [--changed] [--json]`
+
+The work queue (see [agents.md](agents.md#the-work-queue-your-agent-fixes-lockwire-checks)): every claim that needs attention, one per line — id, kind, where the claim is now, and what's wrong. A dry run: nothing is written. Scoped like `check`: paths can be docs, code files or directories. `--json` gives each task's `resolutions` too.
+
+```bash
+lockwire tasks
+lockwire tasks --changed --json
+```
+
+## `lockwire task <id> [--json]`
+
+One task in full: the claim, the bound code or value **as stamped** (from git: the first commit where it fingerprints exactly as stamped, marked approximate if none does) and **now**, and what to do.
+
+## `lockwire resolve <id> [--note "..."]`
+
+After editing the doc so the claim is true, re-stamp that one claim (nothing else in the doc). It is checked first and refused — exit 1, with the reason — if a number still disagrees with its value, the target still doesn't exist, or the marker was removed. Resolving an already-fresh claim is a no-op. The note and who resolved it go into the claim's history.
+
+```bash
+lockwire resolve k7q2m9xv --note "p50 is 15.1ms after the rerun"
+```
 
 ## `lockwire status [--scope <glob>] [--json]`
 

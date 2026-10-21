@@ -4,6 +4,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { check, refs, type UnlinkedMarker, unlinkedForWithin } from "./actions.js";
 import { readConfig } from "./config.js";
 import { describeDrift } from "./format.js";
+import { withRepoLock } from "./lock.js";
 import { isLockwireRepo, toPosix, toRepoRelative, tryFindRepoRoot } from "./repo.js";
 import type { Actor, Anchor, LockwireConfig } from "./types.js";
 
@@ -158,7 +159,9 @@ export async function reportDriftFor(
   // Inert in a repository that never opted into lockwire, like the PreToolUse hooks.
   if (!isLockwireRepo(repoRoot)) return { text: "", anyDrift: false };
   const config = await readConfig(repoRoot);
-  const result = await check(repoRoot, config, [touchedPath], actor ? { actor } : {});
+  const result = await withRepoLock(repoRoot, () =>
+    check(repoRoot, config, [touchedPath], actor ? { actor } : {}),
+  );
   const relevant = result.results.filter(
     (r) =>
       (r.anchor.target.path === touchedPath || r.anchor.doc === touchedPath) &&

@@ -4,6 +4,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { check, refs, unlinkedForWithin } from "./actions.js";
 import { readConfig } from "./config.js";
 import { describeDrift } from "./format.js";
+import { withRepoLock } from "./lock.js";
 import { isLockwireRepo, toPosix, toRepoRelative, tryFindRepoRoot } from "./repo.js";
 export async function readStdinJson() {
     const chunks = [];
@@ -109,7 +110,7 @@ export async function reportDriftFor(repoRoot, touchedPath, actor) {
     if (!isLockwireRepo(repoRoot))
         return { text: "", anyDrift: false };
     const config = await readConfig(repoRoot);
-    const result = await check(repoRoot, config, [touchedPath], actor ? { actor } : {});
+    const result = await withRepoLock(repoRoot, () => check(repoRoot, config, [touchedPath], actor ? { actor } : {}));
     const relevant = result.results.filter((r) => (r.anchor.target.path === touchedPath || r.anchor.doc === touchedPath) &&
         (r.status === "drifted" || r.status === "orphaned"));
     const unlinked = result.unlinked.filter((u) => u.doc === touchedPath);

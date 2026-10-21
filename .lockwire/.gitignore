@@ -1,3 +1,4 @@
 # lockwire's derived, machine-local files
 cache/
 hook.log
+lock

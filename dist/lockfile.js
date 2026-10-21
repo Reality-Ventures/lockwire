@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { stripBom } from "./repo.js";
 const LOCKFILE_NAME = "lockwire.lock";
 export function lockfilePath(repoRoot) {
@@ -26,7 +26,7 @@ export async function writeLockfile(repoRoot, lockfile) {
         version: 1,
         anchors: [...lockfile.anchors].sort((a, b) => a.id.localeCompare(b.id)),
     };
-    await writeFile(lockfilePath(repoRoot), `${JSON.stringify(sorted, null, 2)}\n`, "utf8");
+    await writeFileAtomic(lockfilePath(repoRoot), `${JSON.stringify(sorted, null, 2)}\n`);
 }
 export function upsertAnchor(lockfile, anchor) {
     const anchors = lockfile.anchors.filter((a) => a.id !== anchor.id);
@@ -45,5 +45,17 @@ export function newAnchorId() {
     for (let i = 0; i < 8; i++)
         id += ID_ALPHABET[Math.floor(Math.random() * ID_ALPHABET.length)];
     return id;
+}
+/** Write via a temp file and a rename, so a concurrent reader sees the old file or the new one, never half. */
+export async function writeFileAtomic(path, text) {
+    const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+    try {
+        await writeFile(tmp, text, "utf8");
+        await rename(tmp, path);
+    }
+    catch (err) {
+        await rm(tmp, { force: true }).catch(() => undefined);
+        throw err;
+    }
 }
 //# sourceMappingURL=lockfile.js.map

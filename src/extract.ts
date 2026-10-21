@@ -315,6 +315,25 @@ export function extractFileSymbols(
       : node;
   }
 
+  /** The whole declaration as written: with its decorators, `export`, and `const x =` for an arrow. */
+  function declarationText(node: Node): string {
+    let n = node;
+    for (;;) {
+      const p = n.parent;
+      if (!p) break;
+      if (
+        p.type === "decorated_definition" ||
+        p.type === "export_statement" ||
+        p.type === "variable_declarator" ||
+        p.type === "lexical_declaration" ||
+        p.type === "variable_declaration"
+      )
+        n = p;
+      else break;
+    }
+    return n.text;
+  }
+
   function addSymbol(symbolPath: string, kind: string, defNode: Node, exported: boolean) {
     const name = symbolPath.includes(".")
       ? symbolPath.slice(symbolPath.lastIndexOf(".") + 1)
@@ -338,6 +357,7 @@ export function extractFileSymbols(
       exported,
       sigTokens,
       bodyText: bodyNode.text,
+      sourceText: declarationText(defNode),
       bodyNormalized,
       deps,
     };

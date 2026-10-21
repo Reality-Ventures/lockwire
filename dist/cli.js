@@ -10,9 +10,11 @@ import { formatGithub, formatJson, formatText } from "./format.js";
 import { runClaudeHook } from "./hook-claude.js";
 import { runCodexHook } from "./hook-codex.js";
 import { readLedger, verifyLedger } from "./ledger.js";
+import { withRepoLock } from "./lock.js";
 import { readLockfile, writeLockfile } from "./lockfile.js";
 import { scanMarkers } from "./markers.js";
 import { findRepoRoot, isPathGitignored, resolveInsideRepo, toDisplayPath, toRepoPath, } from "./repo.js";
+import { listTasks, resolveTask, taskContext } from "./tasks.js";
 import { DEFAULT_CONFIG } from "./types.js";
 import { dataFormatOf } from "./values.js";
 /** Flags that never take a value, so `check --changed src/a.ts` leaves `src/a.ts` a path. */
@@ -93,9 +95,7 @@ async function main() {
                     const abs = resolveInsideRepo(repoRoot, doc);
                     if (!abs || scanMarkers(await readFile(abs, "utf8")).length === 0)
                         continue;
-                    const result = await linkDoc(repoRoot, doc, config, actor, {
-                        reviewed: Boolean(flags.reviewed),
-                    });
+                    const result = await withRepoLock(repoRoot, () => linkDoc(repoRoot, doc, config, actor, { reviewed: Boolean(flags.reviewed) }));
                     printLinkResult(doc, result);
                     totals.docs++;
                     totals.created += result.created;
@@ -123,13 +123,11 @@ async function main() {
                         : ["path", "body"];
                 if (!path)
                     throw new Error("target must be path or path#Symbol");
-                const anchor = await linkLockfileOnly(repoRoot, doc, { path, ...(symbol ? { symbol } : {}) }, tiers, config, actor);
+                const anchor = await withRepoLock(repoRoot, () => linkLockfileOnly(repoRoot, doc, { path, ...(symbol ? { symbol } : {}) }, tiers, config, actor));
                 console.log(`linked ${anchor.id} -> ${target}`);
             }
             else {
-                const result = await linkDoc(repoRoot, doc, config, actor, {
-                    reviewed: Boolean(flags.reviewed),
-                });
+                const result = await withRepoLock(repoRoot, () => linkDoc(repoRoot, doc, config, actor, { reviewed: Boolean(flags.reviewed) }));
                 printLinkResult(doc, result);
             }
             break;
@@ -147,10 +145,7 @@ async function main() {
                 : positional.length > 0
                     ? positional.map((p) => toRepoPath(repoRoot, p))
                     : undefined;
-            const result = await check(repoRoot, config, changedOnly, {
-                write: !flags["no-write"],
-                actor,
-            });
+            const result = await withRepoLock(repoRoot, () => check(repoRoot, config, changedOnly, { write: !flags["no-write"], actor }));
             const fmt = typeof flags.format === "string" ? flags.format : "text";
             const out = fmt === "json"
                 ? formatJson(result, null)
@@ -208,7 +203,7 @@ async function main() {
             if (!["updated", "superseded", "false-positive"].includes(resolution))
                 throw new Error(`unknown resolution "${resolution}": use updated, superseded or false-positive`);
             const config = await readConfig(repoRoot);
-            await ack(repoRoot, id, resolution, typeof flags.note === "string" ? flags.note : undefined, actor, config);
+            await withRepoLock(repoRoot, () => ack(repoRoot, id, resolution, typeof flags.note === "string" ? flags.note : undefined, actor, config));
             console.log(`acknowledged ${id}`);
             break;
         }
@@ -216,7 +211,7 @@ async function main() {
             const [id] = positional;
             if (!id || typeof flags.reason !== "string" || typeof flags.expires !== "string")
                 throw new Error("usage: lockwire waive <id> --reason ... --expires YYYY-MM-DD");
-            await waive(repoRoot, id, flags.reason, flags.expires, actor);
+            await withRepoLock(repoRoot, () => waive(repoRoot, id, String(flags.reason), String(flags.expires), actor));
             console.log(`waived ${id} until ${flags.expires}`);
             break;
         }
@@ -224,7 +219,7 @@ async function main() {
             const [id] = positional;
             if (!id)
                 throw new Error("usage: lockwire unlink <id>");
-            await unlink(repoRoot, id);
+            await withRepoLock(repoRoot, () => unlink(repoRoot, id));
             console.log(`unlinked ${id}`);
             break;
         }
@@ -245,6 +240,70 @@ async function main() {
                 await runCodexHook(adapter, repoRoot);
             else
                 throw new Error("usage: lockwire hook claude-pre|claude-post|codex-pre|codex-post");
+            break;
+        }
+        case "tasks": {
+            // The agent work queue: what needs attention, one line each (or JSON for an agent).
+            const config = await readConfig(repoRoot);
+            if (flags.changed && positional.length > 0)
+                throw new Error("pass either paths or --changed, not both");
+            const scope = flags.changed
+                ? changedFiles(repoRoot, typeof flags.base === "string" ? { base: flags.base } : {})
+                : positional.length > 0
+                    ? positional.map((p) => toRepoPath(repoRoot, p))
+                    : undefined;
+            const tasks = await listTasks(repoRoot, config, scope);
+            if (flags.json)
+                console.log(JSON.stringify(tasks, null, 2));
+            else if (tasks.length === 0)
+                console.log("no documentation tasks");
+            else {
+                for (const t of tasks)
+                    console.log(`${t.id}  ${t.kind.padEnd(14)} ${t.doc ?? "(lockfile-only)"}:${t.line ?? "-"}  ${t.summary}`);
+                console.log(`${tasks.length} task${tasks.length === 1 ? "" : "s"} — \`lockwire task <id>\` for one in full`);
+            }
+            break;
+        }
+        case "task": {
+            const [id] = positional;
+            if (!id)
+                throw new Error("usage: lockwire task <id> [--json]");
+            const ctx = await taskContext(repoRoot, await readConfig(repoRoot), id);
+            if (flags.json) {
+                console.log(JSON.stringify(ctx, null, 2));
+                break;
+            }
+            const { task } = ctx;
+            console.log(`${task.id}  ${task.kind}  ${task.doc ?? "(lockfile-only)"}:${task.line ?? "-"}`);
+            console.log(`  ${task.summary}`);
+            if (ctx.claimText)
+                console.log(`\nclaim:\n  ${ctx.claimText}`);
+            const show = (title, snap) => {
+                console.log(`\n${title}${snap.commit ? ` (${snap.commit.slice(0, 7)}${snap.exact === false ? ", approximate" : ""})` : ""}:`);
+                if (snap.source !== null)
+                    console.log(snap.source.replace(/^/gm, "  "));
+                if (snap.note)
+                    console.log(`  (${snap.note})`);
+            };
+            if (ctx.stamped)
+                show("as stamped", ctx.stamped);
+            show("now", ctx.now);
+            console.log("\nto resolve:");
+            for (const r of task.resolutions)
+                console.log(`  - ${r}`);
+            break;
+        }
+        case "resolve": {
+            const [id] = positional;
+            if (!id)
+                throw new Error('usage: lockwire resolve <id> [--note "what you checked"]');
+            const outcome = await resolveTask(repoRoot, await readConfig(repoRoot), id, actor, typeof flags.note === "string" ? flags.note : undefined);
+            console.log(outcome.status === "refused"
+                ? `refused ${id}: ${outcome.reason}`
+                : `${outcome.status} ${id}${outcome.anchorId && outcome.anchorId !== id ? ` (now anchor ${outcome.anchorId})` : ""}`);
+            if (outcome.remaining.length > 0)
+                console.log(`${outcome.remaining.length} more on the same doc: ${outcome.remaining.map((t) => t.id).join(", ")}`);
+            process.exitCode = outcome.status === "refused" ? 1 : 0;
             break;
         }
         case "index": {
@@ -268,7 +327,7 @@ async function main() {
         }
         default:
             console.log("lockwire — bind documentation claims to code fingerprints\n");
-            console.log("commands: init, link, check, status, refs, history, ack, waive, unlink, ledger verify, index, hook, mcp");
+            console.log("commands: init, link, check, tasks, task, resolve, status, refs, history, ack, waive, unlink, ledger verify, index, hook, mcp");
             process.exitCode = cmd ? 1 : 0;
     }
 }

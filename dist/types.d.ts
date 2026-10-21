@@ -94,6 +94,8 @@ export interface ResolvedSymbol {
     exported: boolean;
     sigTokens: string;
     bodyText: string;
+    /** The whole declaration as written, for showing an agent what a claim is about. */
+    sourceText: string;
     bodyNormalized: string;
     deps: string[];
 }

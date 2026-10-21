@@ -279,6 +279,18 @@ $ lockwire history k7q2m9xv
 
 Inside Claude Code, the hook does this automatically — before the edit, you'd see the claim injected as context; after, you'd see exactly which claim just drifted, with no `check` invocation needed. See [docs/agents.md](docs/agents.md) for the injected text.
 
+## Let your agent fix it
+
+lockwire doesn't write docs and has no model of its own. It gives the agent you already run — Claude Code, Codex, anything that speaks MCP — a work queue: every claim that's wrong, the code or value it was checked against and what it is now, and a resolve step that re-checks the fix and refuses one that's still wrong (a number that still disagrees with its data, a marker pointing at nothing). Ask your agent to run the `fix-docs` prompt, or do it by hand:
+
+```bash
+lockwire tasks                 # what needs attention
+lockwire task k7q2m9xv         # one task: the claim, the code as stamped and now
+lockwire resolve k7q2m9xv --note "documented the new scope parameter"
+```
+
+Every resolution is recorded with who made it and why. See [docs/agents.md](docs/agents.md#the-work-queue-your-agent-fixes-lockwire-checks).
+
 ## What lockwire does not do
 
 Hashes cannot catch semantic drift — a doc saying "we use Redux" when the code moved to Zustand, where every file path still resolves and no signature changed. Catching that requires reasoning about meaning, not fingerprints; [ClaudeDrift](https://github.com/marky291/claude-drift) does this well as an on-demand, LLM-reasoning layer, and pairs naturally with lockwire's continuous, deterministic one — see [docs/comparison.md](docs/comparison.md). Numbers are the exception: a sentence bound to the value it came from — a JSON key or a LaTeX macro a pipeline writes — is checked against that value at the precision it states, so "the lower bound is 0.18" is flagged when a rerun makes it 0.19, and not when it makes it 0.1791 ([docs/concepts.md](docs/concepts.md#numbers-and-other-values)). P0 supports TypeScript, TSX, JavaScript, and Python source, and values in JSON and LaTeX files; cross-file rename detection, a resolver agent, and semantic-claim extraction are roadmap, not shipped — see [docs/concepts.md](docs/concepts.md#limitations-read-before-relying-on-this-in-production).

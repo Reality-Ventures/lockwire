@@ -50,7 +50,7 @@ Where they differ:
 - **History.** Autopilot's record is its PRs. lockwire keeps a per-claim, tamper-evident ledger (`lockwire history`: how often this claim broke, on which commit, who noticed).
 - **Numbers.** A value anchor checks a stated number against the file it came from, at the stated precision. Autopilot may catch a changed number if it reads the diff that changed it; there's no guarantee either way, and it can't be asked in advance which sentences depend on `results/metrics.json`.
 
-They compose: lockwire's check is a precise, cheap trigger, and a generator like Autopilot or [ClaudeDrift](#claudedrift) is what you'd point at the claims it flags.
+They compose, and lockwire is built for that: its [work queue](agents.md#the-work-queue-your-agent-fixes-lockwire-checks) (`lockwire_tasks`, `lockwire_task_context`, `lockwire_resolve`) hands the agent you already run the exact claims to fix, the code or value as stamped and now, and a resolve step that checks the fix — the drafting Autopilot does with its own model and credits, done by your agent, with a deterministic check at the end.
 
 ## Why we aren't competing on the hash
 

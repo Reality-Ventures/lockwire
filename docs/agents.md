@@ -106,5 +106,37 @@ Any agent that reads `npx skills add`-style skills (Cursor, Gemini CLI, OpenCode
 | `lockwire_link` | `doc`, `reviewed?` | Scan a doc for markers and stamp fresh fingerprints. |
 | `lockwire_ack` | `anchor`, `resolution`, `note?` | Record that drift was handled. |
 | `lockwire_waive` | `anchor`, `reason`, `expires` | Time-boxed, logged, expiring waiver. |
+| `lockwire_tasks` | `paths?`, `changed?` | The work queue: every claim that needs attention, as a task saying what is wrong and what to do. Read-only. |
+| `lockwire_task_context` | `id` | One task in full: the whole claim, the bound code or value as stamped and as it is now, and the claim's history. Read-only. |
+| `lockwire_resolve` | `id`, `note?` | After editing the doc, re-stamp that one claim — checked first, refused (with the reason) if it still doesn't hold. |
+
+The server also offers a **`fix-docs` prompt** (optional `scope`) that walks an agent through the loop below.
+
+## The work queue: your agent fixes, lockwire checks
+
+lockwire has no model of its own and never writes a sentence. It tells the agent you already run — Claude Code, Codex, Cursor, anything that speaks MCP — exactly which claims are wrong, gives it what it needs to fix each one, and checks the fix. The loop:
+
+1. **`lockwire_tasks`** lists what needs attention. Each task has an `id`, a `kind`, the doc and the claim's line, a one-line `summary`, and `resolutions` in order of preference:
+
+   | Kind | Meaning |
+   |---|---|
+   | `code-changed` | The bound code changed in a tier the claim depends on. |
+   | `value-wrong` | A number (or string) in the sentence no longer matches the value it's bound to. |
+   | `value-changed` | A bound value moved and the sentence states nothing lockwire can compare it with. |
+   | `claim-edited` | Someone reworded the claim; the code didn't move. |
+   | `target-missing` | The bound symbol, key or file is gone (or outside the repository). |
+   | `marker-removed` | The marker was deleted from the doc. |
+   | `unlinked` | A marker nobody has linked: nothing is checking the claim under it. Its id is `unlinked:<doc>:<marker line>:<key>`, where the key is a hash of the marker's target and claim — so the id still finds the marker after lines above it move, and never lands on a different marker that has taken its line. |
+
+2. **`lockwire_task_context`** returns the whole claim sentence and the target **as stamped** and **now**: the declaration of the bound function or class, or the value. The stamped side comes from git — the first commit at or after the one recorded when the claim was stamped where the code fingerprints *exactly* as stamped (claims are usually stamped before the change is committed). If no commit has it exactly, you get the closest one with `exact: false` and a note saying so.
+3. **The agent edits the doc.** It changes the sentence, the number, or the marker's target — never the code or data to match a doc.
+4. **`lockwire_resolve`** re-stamps that one claim and nothing else in the doc, then re-checks it from scratch. A value claim whose number still disagrees is refused with the reason ("the claim states 14.0ms but results/bench.json#latency.p50 is 15.1"), as is a marker whose target still doesn't exist; a removed marker is refused with what to do instead. The agent's `note` and its identity (the MCP client's own name, e.g. `claude-code`, `codex`) go into the claim's history. Resolving a claim that is already fresh is a no-op.
+5. A claim that no longer applies is retired with `lockwire_ack` (`superseded`) instead.
+
+Every task's `line` is where the claim is *now*, read from the doc at the time of the call. `paths` can name docs, code files or directories (`docs/`). Writes are serialised per repository — the MCP server queues parallel calls, and separate processes (hooks, the CLI) take a `.lockwire/lock` file, which `lockwire init` git-ignores — so an agent issuing resolves in parallel loses none of them. A claim that is waived or superseded isn't resolved: `lockwire_resolve` says so and writes nothing.
+
+The same loop runs from a shell or CI with `lockwire tasks`, `lockwire task <id>` and `lockwire resolve <id>` — see [cli.md](cli.md#lockwire-tasks-paths---changed---json).
+
+**Tested on a real repository.** We replayed a real rerun from a public research repo whose agents write reports from results files: with markers added to the report beforehand, the rerun produced nine `value-wrong` tasks (every number whose value moved past its stated precision), and the fix the repo's own agent made a minute later resolved all nine — lockwire confirmed each corrected number against the data.
 
 `lockwire_history` is the one query that doesn't exist anywhere else in the documentation-drift space — see [docs/comparison.md](comparison.md). Every other tool we found answers "is this doc stale right now"; none answer "this claim has broken four times, here's each commit and each actor."

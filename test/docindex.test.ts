@@ -544,7 +544,7 @@ describe("the cache stays out of git", () => {
     settleTree(root);
     await loadDocIndex(root, DEFAULT_CONFIG, { now: () => BASE });
     const lines = (await readFile(join(root, ".lockwire", ".gitignore"), "utf8")).split("\n").filter(Boolean);
-    expect(lines).toEqual(["hook.log", "my-local-notes.txt", "cache/"]);
+    expect(lines).toEqual(["hook.log", "my-local-notes.txt", "cache/", "lock"]);
   });
 });
 

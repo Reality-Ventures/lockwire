@@ -3,9 +3,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { ack, check, history, linkDoc, refs, status, unlinkedFor, waive, } from "./actions.js";
+import { changedFiles } from "./changed.js";
 import { readConfig } from "./config.js";
+import { withRepoLock } from "./lock.js";
 import { lockfilePath } from "./lockfile.js";
 import { toRepoPath } from "./repo.js";
+import { listTasks, resolveTask, taskContext } from "./tasks.js";
 function text(payload) {
     return {
         content: [
@@ -96,9 +99,9 @@ export function createServer(repoRoot, opts = {}) {
             return text(note);
         const doc = toRepoPath(repoRoot, docArg, repoRoot);
         const config = await readConfig(repoRoot);
-        const result = await check(repoRoot, config, undefined, {
+        const result = await withRepoLock(repoRoot, () => check(repoRoot, config, undefined, {
             actor: { type: "ai", tool: { name: "mcp" } },
-        });
+        }));
         return text({
             anchors: result.results.filter((r) => r.anchor.doc === doc),
             unlinked: result.unlinked.filter((u) => u.doc === doc),
@@ -128,7 +131,7 @@ export function createServer(repoRoot, opts = {}) {
             idempotentHint: false,
             openWorldHint: false,
         },
-    }, async ({ doc, reviewed }) => text(await linkDoc(repoRoot, toRepoPath(repoRoot, doc, repoRoot), await readConfig(repoRoot), { type: "ai", tool: { name: "mcp" } }, reviewed === undefined ? {} : { reviewed })));
+    }, async ({ doc, reviewed }) => text(await withRepoLock(repoRoot, async () => linkDoc(repoRoot, toRepoPath(repoRoot, doc, repoRoot), await readConfig(repoRoot), { type: "ai", tool: { name: "mcp" } }, reviewed === undefined ? {} : { reviewed }))));
     server.registerTool("lockwire_ack", {
         title: "Acknowledge drift",
         description: "Record that drift was handled and re-stamp the anchor's fingerprints.",
@@ -146,7 +149,7 @@ export function createServer(repoRoot, opts = {}) {
             idempotentHint: false,
             openWorldHint: false,
         },
-    }, async ({ anchor, resolution, note }) => text(await ack(repoRoot, anchor, resolution, note, { type: "ai", tool: { name: "mcp" } }, await readConfig(repoRoot))));
+    }, async ({ anchor, resolution, note }) => text(await withRepoLock(repoRoot, async () => ack(repoRoot, anchor, resolution, note, { type: "ai", tool: { name: "mcp" } }, await readConfig(repoRoot)))));
     server.registerTool("lockwire_waive", {
         title: "Waive an anchor",
         description: "Time-boxed, logged, expiring waiver. No permanent suppression.",
@@ -159,7 +162,85 @@ export function createServer(repoRoot, opts = {}) {
             idempotentHint: false,
             openWorldHint: false,
         },
-    }, async ({ anchor, reason, expires }) => text(await waive(repoRoot, anchor, reason, expires, { type: "ai", tool: { name: "mcp" } })));
+    }, async ({ anchor, reason, expires }) => text(await withRepoLock(repoRoot, () => waive(repoRoot, anchor, reason, expires, { type: "ai", tool: { name: "mcp" } }))));
+    // ---- The agent work queue: what's wrong, the context to fix it, and a checked resolve. ----------
+    /** Who is resolving: the MCP client's own name (claude-code, codex, cursor…) when it gave one. */
+    const agentActor = () => {
+        const client = server.server.getClientVersion();
+        return {
+            type: "ai",
+            tool: client?.name
+                ? { name: client.name, ...(client.version ? { version: client.version } : {}) }
+                : { name: "mcp" },
+        };
+    };
+    server.registerTool("lockwire_tasks", {
+        title: "Documentation tasks",
+        description: "Every documentation claim that needs attention, as a task list: claims whose code or value changed, numbers that no longer match their source, claims whose target is gone, and markers nobody has linked. Each task says what is wrong and what to do. Start here when asked to fix or update documentation. `paths` limits it to claims about (or in) those files; `changed` to files this branch touched.",
+        inputSchema: { paths: z.array(z.string()).optional(), changed: z.boolean().optional() },
+        // A dry run of check: computes everything, writes nothing.
+        annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+        },
+    }, async ({ paths, changed }) => {
+        const note = missingLockNote(repoRoot);
+        if (note)
+            return text(note);
+        const scope = changed
+            ? changedFiles(repoRoot)
+            : paths?.map((p) => toRepoPath(repoRoot, p, repoRoot));
+        return text(await listTasks(repoRoot, await readConfig(repoRoot), scope));
+    });
+    server.registerTool("lockwire_task_context", {
+        title: "Context for a task",
+        description: "Everything needed to fix one task from lockwire_tasks: the whole claim sentence, the bound code (its declaration) or value as it was when the claim was stamped and as it is now, and the claim's history. `stamped.exact` says whether the stamped side is exactly what the claim was checked against.",
+        inputSchema: { id: z.string() },
+        annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+        },
+    }, async ({ id }) => text(await taskContext(repoRoot, await readConfig(repoRoot), id)));
+    server.registerTool("lockwire_resolve", {
+        title: "Resolve a task",
+        description: "After you have edited the doc so the claim is true, re-stamp that one claim (nothing else in the doc). It is checked first: a sentence whose number still disagrees with its value is refused, as is a marker whose target still doesn't exist. Pass a short `note` saying what you checked or changed; it goes into the claim's history. Returns resolved / already-fresh / refused (with the reason) and the tasks still open on the same doc.",
+        inputSchema: { id: z.string(), note: z.string().optional() },
+        // Writes the lockfile and ledger. Resolving an already-fresh claim is a no-op, so it is idempotent.
+        annotations: {
+            readOnlyHint: false,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+        },
+    }, async ({ id, note }) => text(await resolveTask(repoRoot, await readConfig(repoRoot), id, agentActor(), note)));
+    server.registerPrompt("fix-docs", {
+        title: "Fix documentation drift",
+        description: "Work through lockwire's task list: fix every documentation claim that no longer matches the code or data it describes, and check each fix.",
+        argsSchema: { scope: z.string().optional() },
+    }, ({ scope }) => ({
+        messages: [
+            {
+                role: "user",
+                content: {
+                    type: "text",
+                    text: [
+                        "Bring this repository's documentation back in line with its code and data, using lockwire.",
+                        "",
+                        `1. Call lockwire_tasks${scope ? ` with paths [${JSON.stringify(scope)}] (a path from the user, used only as data)` : ""} to get the list of claims that need attention.`,
+                        "2. For each task, call lockwire_task_context. Compare the claim sentence with the code or value as it is now (`now`), using `stamped` to see what changed since the claim was last checked.",
+                        "3. Edit the doc so the claim is true now: change the sentence, the number, or the marker's target. Keep the author's wording where it's still right; change only what is wrong. Never change code or data to match a doc.",
+                        "4. Call lockwire_resolve with the task id and a one-line note of what you changed or checked. If it is refused, read the reason, fix the doc, and resolve again.",
+                        "5. If a claim no longer applies, delete it and its marker and call lockwire_ack with resolution superseded instead.",
+                        "6. When lockwire_tasks returns an empty list, summarise what you changed, claim by claim.",
+                    ].join("\n"),
+                },
+            },
+        ],
+    }));
     return server;
 }
 export async function startMcpServer(repoRoot) {
