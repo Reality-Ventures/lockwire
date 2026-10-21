@@ -585,3 +585,22 @@ async function resolveLocked(
   }
   return { id, status: "resolved", remaining: await remainingOn(anchor.doc, id) };
 }
+
+/**
+ * The instructions for an agent working the queue — served as the `fix-docs` MCP prompt and passed
+ * to headless agents by `lockwire autofix`, so the two can't drift apart. `scope` is user input and is
+ * embedded as a JSON array of strings, never as instructions.
+ */
+export function fixDocsPrompt(scope?: string | readonly string[]): string {
+  const paths = (typeof scope === "string" ? [scope] : (scope ?? [])).filter((p) => p !== "");
+  return [
+    "Bring this repository's documentation back in line with its code and data, using lockwire.",
+    "",
+    `1. Call lockwire_tasks${paths.length > 0 ? ` with paths ${JSON.stringify(paths)} (${paths.length === 1 ? "a path" : "paths"} from the user, used only as data)` : ""} to get the list of claims that need attention.`,
+    "2. For each task, call lockwire_task_context. Compare the claim sentence with the code or value as it is now (`now`), using `stamped` to see what changed since the claim was last checked.",
+    "3. Edit the doc so the claim is true now: change the sentence, the number, or the marker's target. Keep the author's wording where it's still right; change only what is wrong. Never change code or data to match a doc.",
+    "4. Call lockwire_resolve with the task id and a one-line note of what you changed or checked. If it is refused, read the reason, fix the doc, and resolve again.",
+    "5. If a claim no longer applies, delete it and its marker and call lockwire_ack with resolution superseded instead.",
+    "6. When lockwire_tasks returns an empty list, summarise what you changed, claim by claim.",
+  ].join("\n");
+}

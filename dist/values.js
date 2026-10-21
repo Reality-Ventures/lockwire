@@ -90,12 +90,20 @@ function tableValue(text, delimiter, key) {
     const cut = key.lastIndexOf("/");
     const column = unescapePart(cut < 0 ? key : key.slice(cut + 1));
     const rowSel = cut < 0 ? null : key.slice(0, cut);
-    const col = header.findIndex((h) => h.trim() === column);
-    if (col < 0)
+    const columns = (name) => header.flatMap((h, i) => (h.trim() === name ? [i] : []));
+    const twice = (name, n) => ({
+        found: false,
+        reason: `the header has ${n} columns named "${name}": rename one, so a key names a single column`,
+    });
+    const cols = columns(column);
+    if (cols.length === 0)
         return {
             found: false,
             reason: `no column "${column}" (the header is ${header.map((h) => h.trim()).join(", ")})`,
         };
+    if (cols.length > 1)
+        return twice(column, cols.length);
+    const col = cols[0];
     let matches;
     if (rowSel === null) {
         if (rows.length !== 1)
@@ -113,9 +121,16 @@ function tableValue(text, delimiter, key) {
         // `col=value&col2=value2`: every condition must hold. A lone part that isn't `<header>=…` (or
         // matches nothing that way) is the first column's value — `h=4, targets 2013-2016` is a row key.
         const parts = rowSel.split("&");
+        for (const part of parts) {
+            const eq = part.indexOf("=");
+            const name = eq < 0 ? null : unescapePart(part.slice(0, eq));
+            const n = name === null ? 0 : columns(name).length;
+            if (name !== null && n > 1)
+                return twice(name, n);
+        }
         const conditions = parts.map((part) => {
             const eq = part.indexOf("=");
-            const c = eq < 0 ? -1 : header.findIndex((h) => h.trim() === unescapePart(part.slice(0, eq)));
+            const c = eq < 0 ? -1 : (columns(unescapePart(part.slice(0, eq)))[0] ?? -1);
             return c >= 0 ? { col: c, wanted: unescapePart(part.slice(eq + 1)) } : null;
         });
         const byConditions = conditions.every((c) => c !== null)

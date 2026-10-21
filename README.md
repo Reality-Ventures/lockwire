@@ -196,7 +196,7 @@ Or without installing anything, via `npx`:
 npx lockwire check
 ```
 
-**GitHub Action** — merge-time gate:
+**GitHub Action** — merge-time gate (and [`lockwire/autofix`](docs/autofix.md) to fix what it finds):
 
 ```yaml
 - uses: actions/checkout@v4
@@ -290,6 +290,17 @@ lockwire resolve k7q2m9xv --note "documented the new scope parameter"
 ```
 
 Every resolution is recorded with who made it and why. See [docs/agents.md](docs/agents.md#the-work-queue-your-agent-fixes-lockwire-checks).
+
+To run it unattended, `lockwire autofix` starts Claude Code or Codex on your own key — only when a claim is actually wrong — then re-checks every claim and refuses a run that touched anything but docs. In CI, the Action does the same and opens a pull request:
+
+```yaml
+- uses: Reality-Ventures/lockwire/autofix@v0
+  with:
+    agent: claude-code
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+See [docs/autofix.md](docs/autofix.md).
 
 ## What lockwire does not do
 

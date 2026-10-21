@@ -15,6 +15,7 @@ import {
   waive,
 } from "./actions.js";
 import { cliActor } from "./actor.js";
+import { autofix } from "./autofix.js";
 import { changedFiles } from "./changed.js";
 import { readConfig, writeConfig } from "./config.js";
 import { ensureLockwireGitignore, indexPath, loadDocIndex } from "./docindex.js";
@@ -46,6 +47,8 @@ const BOOLEAN_FLAGS = new Set([
   "json",
   "fail-on-unlinked",
   "rebuild",
+  "dry-run",
+  "quiet",
 ]);
 
 function parseFlags(args: string[]): {
@@ -71,6 +74,14 @@ function parseFlags(args: string[]): {
     }
   }
   return { positional, flags };
+}
+
+/** `path#symbol`, split at the first `#`: a symbol (a CSV row key) can contain one, a path can't. */
+function splitTarget(target: string): [string, string | undefined] {
+  const hash = target.indexOf("#");
+  return hash < 0
+    ? [target, undefined]
+    : [target.slice(0, hash), target.slice(hash + 1) || undefined];
 }
 
 function printLinkResult(doc: string, result: LinkResult) {
@@ -146,7 +157,7 @@ async function main() {
       if (doc.startsWith(".."))
         throw new Error(`${docArg} is outside the repository (${repoRoot})`);
       if (target) {
-        const [rawPath, symbol] = target.split("#");
+        const [rawPath, symbol] = splitTarget(target);
         const path = rawPath ? toRepoPath(repoRoot, rawPath) : rawPath;
         const tiers =
           typeof flags.tiers === "string"
@@ -238,7 +249,7 @@ async function main() {
     case "refs": {
       const [target] = positional;
       if (!target) throw new Error("usage: lockwire refs <path>[#symbol]");
-      const [rawPath, symbol] = target.split("#");
+      const [rawPath, symbol] = splitTarget(target);
       const anchors = await refs(repoRoot, toRepoPath(repoRoot, rawPath ?? ""), symbol);
       for (const a of anchors)
         console.log(`${a.doc ?? "(lockfile-only)"}:${a.claim?.line ?? "-"}  ${a.id}`);
@@ -316,6 +327,42 @@ async function main() {
       else if (adapter === "codex-pre" || adapter === "codex-post")
         await runCodexHook(adapter, repoRoot);
       else throw new Error("usage: lockwire hook claude-pre|claude-post|codex-pre|codex-post");
+      break;
+    }
+
+    case "autofix": {
+      // Run the user's own agent on the work queue, then check what it did (see autofix.ts).
+      if (flags.changed && positional.length > 0)
+        throw new Error("pass either paths or --changed, not both");
+      const scope = flags.changed
+        ? changedFiles(repoRoot, typeof flags.base === "string" ? { base: flags.base } : {})
+        : positional.length > 0
+          ? positional.map((p) => toRepoPath(repoRoot, p))
+          : undefined;
+      const agent = typeof flags.agent === "string" ? flags.agent : "claude-code";
+      if (agent !== "claude-code" && agent !== "codex")
+        throw new Error(
+          `unknown --agent "${agent}": use claude-code, codex, or --agent-command "<command>"`,
+        );
+      const maxTurns =
+        typeof flags["max-turns"] === "string" ? Number(flags["max-turns"]) : undefined;
+      if (maxTurns !== undefined && !(Number.isInteger(maxTurns) && maxTurns > 0))
+        throw new Error(`--max-turns must be a positive whole number, not "${flags["max-turns"]}"`);
+      const report = await autofix(repoRoot, {
+        agent,
+        ...(typeof flags["agent-command"] === "string"
+          ? { agentCommand: flags["agent-command"] }
+          : {}),
+        ...(scope ? { scope } : {}),
+        ...(maxTurns ? { maxTurns } : {}),
+        dryRun: Boolean(flags["dry-run"]),
+        showAgentOutput: !flags.quiet,
+      });
+      if (typeof flags.summary === "string")
+        await writeFile(flags.summary, report.markdown, "utf8");
+      if (flags.json) console.log(JSON.stringify(report, null, 2));
+      else console.log(report.markdown.trimEnd());
+      process.exitCode = report.status === "refused" ? 2 : report.status === "partial" ? 1 : 0;
       break;
     }
 
@@ -421,7 +468,7 @@ async function main() {
     default:
       console.log("lockwire — bind documentation claims to code fingerprints\n");
       console.log(
-        "commands: init, link, check, tasks, task, resolve, status, refs, history, ack, waive, unlink, ledger verify, index, hook, mcp",
+        "commands: init, link, check, tasks, task, resolve, autofix, status, refs, history, ack, waive, unlink, ledger verify, index, hook, mcp",
       );
       process.exitCode = cmd ? 1 : 0;
   }

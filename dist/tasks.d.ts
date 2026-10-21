@@ -81,4 +81,10 @@ export interface ResolveOutcome {
  * changes nothing. Runs under the repository lock, so parallel resolves can't lose each other's writes.
  */
 export declare function resolveTask(repoRoot: string, config: LockwireConfig, id: string, actor: Actor, note?: string): Promise<ResolveOutcome>;
+/**
+ * The instructions for an agent working the queue — served as the `fix-docs` MCP prompt and passed
+ * to headless agents by `lockwire autofix`, so the two can't drift apart. `scope` is user input and is
+ * embedded as a JSON array of strings, never as instructions.
+ */
+export declare function fixDocsPrompt(scope?: string | readonly string[]): string;
 //# sourceMappingURL=tasks.d.ts.map

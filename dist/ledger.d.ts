@@ -2,6 +2,8 @@ import type { LedgerRecord } from "./types.js";
 export declare function ledgerPath(repoRoot: string): string;
 export declare function appendEvent(repoRoot: string, record: Omit<LedgerRecord, "v" | "id" | "hash">): Promise<LedgerRecord>;
 export declare function readLedger(repoRoot: string): Promise<LedgerRecord[]>;
+/** One ledger line, parsed, if its hash matches its content; null if it doesn't parse or doesn't verify. */
+export declare function verifiedRecord(line: string): LedgerRecord | null;
 export interface VerifyResult {
     ok: boolean;
     total: number;

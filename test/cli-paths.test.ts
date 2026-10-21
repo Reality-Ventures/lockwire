@@ -107,3 +107,17 @@ describe("MCP path arguments", () => {
     expect(await call("lockwire_verify", { doc: "./CLAUDE.md" })).toContain("alpha");
   });
 });
+
+describe("lockwire link <doc> <target> and refs", () => {
+  it("split the target at the first #, so a CSV row key can contain one", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lockwire-hash-"));
+    await mkdir(join(dir, ".git"));
+    await writeFile(join(dir, "t.csv"), "issue,count\nIssue #42,3\n", "utf8");
+    await writeFile(join(dir, "NOTES.md"), "# N\n", "utf8");
+    const r = cli(["link", "NOTES.md", "t.csv#Issue #42/count"], dir);
+    expect(r.status, r.stderr).toBe(0);
+    const lock = JSON.parse(await readFile(join(dir, "lockwire.lock"), "utf8"));
+    expect(lock.anchors[0]?.target).toEqual({ path: "t.csv", symbol: "Issue #42/count" });
+    expect(cli(["refs", "t.csv#Issue #42/count"], dir).stdout).toContain(lock.anchors[0].id);
+  });
+});

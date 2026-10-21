@@ -143,6 +143,10 @@ After editing the doc so the claim is true, re-stamp that one claim (nothing els
 lockwire resolve k7q2m9xv --note "p50 is 15.1ms after the rerun"
 ```
 
+## `lockwire autofix [paths…] [--agent claude-code|codex | --agent-command "…"] [--changed] [--max-turns N] [--dry-run] [--summary <file>] [--json] [--quiet]`
+
+Runs your own agent on the work queue and checks what it did: see [autofix.md](autofix.md). Exits `0` (fixed, or nothing to do), `1` (claims still open) or `2` (refused: the agent changed non-documentation files, edited lockwire's state by hand, committed, or couldn't run).
+
 ## `lockwire status [--scope <glob>] [--json]`
 
 Lists every anchor's current status. `--scope` filters by a glob matched against the target path or the doc path (e.g. `src/auth/**`).

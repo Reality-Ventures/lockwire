@@ -135,7 +135,7 @@ lockwire has no model of its own and never writes a sentence. It tells the agent
 
 Every task's `line` is where the claim is *now*, read from the doc at the time of the call. `paths` can name docs, code files or directories (`docs/`). Writes are serialised per repository — the MCP server queues parallel calls, and separate processes (hooks, the CLI) take a `.lockwire/lock` file, which `lockwire init` git-ignores — so an agent issuing resolves in parallel loses none of them. A claim that is waived or superseded isn't resolved: `lockwire_resolve` says so and writes nothing.
 
-The same loop runs from a shell or CI with `lockwire tasks`, `lockwire task <id>` and `lockwire resolve <id>` — see [cli.md](cli.md#lockwire-tasks-paths---changed---json).
+To run the loop unattended — locally or in CI, opening a pull request — use [`lockwire autofix`](autofix.md). The same loop also runs by hand from a shell with `lockwire tasks`, `lockwire task <id>` and `lockwire resolve <id>` — see [cli.md](cli.md#lockwire-tasks-paths---changed---json).
 
 **Tested on a real repository.** We replayed a real rerun from a public research repo whose agents write reports from results files: with markers added to the report beforehand, the rerun produced nine `value-wrong` tasks (every number whose value moved past its stated precision), and the fix the repo's own agent made a minute later resolved all nine — lockwire confirmed each corrected number against the data.
 

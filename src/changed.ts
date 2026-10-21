@@ -94,6 +94,21 @@ export function headCommit(repoRoot: string): string | null {
 }
 
 /**
+ * The git index, path by path (`<mode> <object> <stage>`), or null outside a git repository. A run that
+ * only stages a file still changes what the next `git commit` records, so autofix compares this too.
+ */
+export function indexEntries(repoRoot: string): Map<string, string> | null {
+  const out = tryGit(gitRunner(repoRoot), ["ls-files", "--stage", "-z"]);
+  if (out === null) return null;
+  const entries = new Map<string, string>();
+  for (const entry of out.split("\0")) {
+    const tab = entry.indexOf("\t");
+    if (tab > 0) entries.set(toPosix(entry.slice(tab + 1)), entry.slice(0, tab));
+  }
+  return entries;
+}
+
+/**
  * A file's text at `commit`, read from git, or null if git, the commit or the file isn't there.
  * `commit` comes from the lockfile, which anyone can edit, so only a plain hex object name is passed
  * to git (anything else could be read as an option); `path` must already be contained in the repo.

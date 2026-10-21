@@ -7,7 +7,8 @@
       "claim": {
         "line": 28,
         "hash": "b3:15abaa39039183c05bd8c7c9463ea960",
-        "excerpt": "A fingerprint is `b3:` followed by 32 lowercase hex characters — the first 128 bits of a …"
+        "excerpt": "A fingerprint is `b3:` followed by 32 lowercase hex characters — the first 128 bits of a …",
+        "normHash": "b3:15abaa39039183c05bd8c7c9463ea960"
       },
       "target": {
         "path": "src/hash.ts",

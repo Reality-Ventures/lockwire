@@ -49,6 +49,17 @@ export async function readLedger(repoRoot: string): Promise<LedgerRecord[]> {
   return records;
 }
 
+/** One ledger line, parsed, if its hash matches its content; null if it doesn't parse or doesn't verify. */
+export function verifiedRecord(line: string): LedgerRecord | null {
+  try {
+    const record = JSON.parse(line) as LedgerRecord;
+    const { hash, ...rest } = record;
+    return typeof hash === "string" && fingerprint(canonicalJson(rest)) === hash ? record : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface VerifyResult {
   ok: boolean;
   total: number;
@@ -65,15 +76,9 @@ export async function verifyLedger(repoRoot: string): Promise<VerifyResult> {
   const hashes: string[] = [];
 
   lines.forEach((line, idx) => {
-    try {
-      const record = JSON.parse(line) as LedgerRecord;
-      const { hash, ...rest } = record;
-      const recomputed = fingerprint(canonicalJson(rest));
-      if (recomputed !== hash) badLines.push(idx);
-      else hashes.push(hash);
-    } catch {
-      badLines.push(idx);
-    }
+    const record = verifiedRecord(line);
+    if (record) hashes.push(record.hash);
+    else badLines.push(idx);
   });
 
   return { ok: badLines.length === 0, total: lines.length, badLines, root: fingerprintSet(hashes) };

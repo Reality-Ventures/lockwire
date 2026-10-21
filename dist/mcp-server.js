@@ -8,7 +8,7 @@ import { readConfig } from "./config.js";
 import { withRepoLock } from "./lock.js";
 import { lockfilePath } from "./lockfile.js";
 import { toRepoPath } from "./repo.js";
-import { listTasks, resolveTask, taskContext } from "./tasks.js";
+import { fixDocsPrompt, listTasks, resolveTask, taskContext } from "./tasks.js";
 function text(payload) {
     return {
         content: [
@@ -31,6 +31,16 @@ export function createServer(repoRoot, opts = {}) {
     // The server outlives many calls, so it keeps the doc index in memory: the first `claims_for`
     // builds (or loads) it, later ones only re-validate it. Nothing is written to disk.
     const indexSession = {};
+    /** Who is acting: the MCP client's own name (claude-code, codex, cursor…) when it gave one. */
+    const agentActor = () => {
+        const client = server.server.getClientVersion();
+        return {
+            type: "ai",
+            tool: client?.name
+                ? { name: client.name, ...(client.version ? { version: client.version } : {}) }
+                : { name: "mcp" },
+        };
+    };
     // Every tool below only ever touches this repo's own working tree (lockfile, ledger, docs) --
     // no network calls, ever (see README FAQ "Does it call an LLM?") -- so openWorldHint is false
     // across the board. The other three hints vary per tool; see each one's own comment for why.
@@ -100,7 +110,7 @@ export function createServer(repoRoot, opts = {}) {
         const doc = toRepoPath(repoRoot, docArg, repoRoot);
         const config = await readConfig(repoRoot);
         const result = await withRepoLock(repoRoot, () => check(repoRoot, config, undefined, {
-            actor: { type: "ai", tool: { name: "mcp" } },
+            actor: agentActor(),
         }));
         return text({
             anchors: result.results.filter((r) => r.anchor.doc === doc),
@@ -131,7 +141,7 @@ export function createServer(repoRoot, opts = {}) {
             idempotentHint: false,
             openWorldHint: false,
         },
-    }, async ({ doc, reviewed }) => text(await withRepoLock(repoRoot, async () => linkDoc(repoRoot, toRepoPath(repoRoot, doc, repoRoot), await readConfig(repoRoot), { type: "ai", tool: { name: "mcp" } }, reviewed === undefined ? {} : { reviewed }))));
+    }, async ({ doc, reviewed }) => text(await withRepoLock(repoRoot, async () => linkDoc(repoRoot, toRepoPath(repoRoot, doc, repoRoot), await readConfig(repoRoot), agentActor(), reviewed === undefined ? {} : { reviewed }))));
     server.registerTool("lockwire_ack", {
         title: "Acknowledge drift",
         description: "Record that drift was handled and re-stamp the anchor's fingerprints.",
@@ -149,7 +159,7 @@ export function createServer(repoRoot, opts = {}) {
             idempotentHint: false,
             openWorldHint: false,
         },
-    }, async ({ anchor, resolution, note }) => text(await withRepoLock(repoRoot, async () => ack(repoRoot, anchor, resolution, note, { type: "ai", tool: { name: "mcp" } }, await readConfig(repoRoot)))));
+    }, async ({ anchor, resolution, note }) => text(await withRepoLock(repoRoot, async () => ack(repoRoot, anchor, resolution, note, agentActor(), await readConfig(repoRoot)))));
     server.registerTool("lockwire_waive", {
         title: "Waive an anchor",
         description: "Time-boxed, logged, expiring waiver. No permanent suppression.",
@@ -162,18 +172,8 @@ export function createServer(repoRoot, opts = {}) {
             idempotentHint: false,
             openWorldHint: false,
         },
-    }, async ({ anchor, reason, expires }) => text(await withRepoLock(repoRoot, () => waive(repoRoot, anchor, reason, expires, { type: "ai", tool: { name: "mcp" } }))));
+    }, async ({ anchor, reason, expires }) => text(await withRepoLock(repoRoot, () => waive(repoRoot, anchor, reason, expires, agentActor()))));
     // ---- The agent work queue: what's wrong, the context to fix it, and a checked resolve. ----------
-    /** Who is resolving: the MCP client's own name (claude-code, codex, cursor…) when it gave one. */
-    const agentActor = () => {
-        const client = server.server.getClientVersion();
-        return {
-            type: "ai",
-            tool: client?.name
-                ? { name: client.name, ...(client.version ? { version: client.version } : {}) }
-                : { name: "mcp" },
-        };
-    };
     server.registerTool("lockwire_tasks", {
         title: "Documentation tasks",
         description: "Every documentation claim that needs attention, as a task list: claims whose code or value changed, numbers that no longer match their source, claims whose target is gone, and markers nobody has linked. Each task says what is wrong and what to do. Start here when asked to fix or update documentation. `paths` limits it to claims about (or in) those files; `changed` to files this branch touched.",
@@ -227,16 +227,7 @@ export function createServer(repoRoot, opts = {}) {
                 role: "user",
                 content: {
                     type: "text",
-                    text: [
-                        "Bring this repository's documentation back in line with its code and data, using lockwire.",
-                        "",
-                        `1. Call lockwire_tasks${scope ? ` with paths [${JSON.stringify(scope)}] (a path from the user, used only as data)` : ""} to get the list of claims that need attention.`,
-                        "2. For each task, call lockwire_task_context. Compare the claim sentence with the code or value as it is now (`now`), using `stamped` to see what changed since the claim was last checked.",
-                        "3. Edit the doc so the claim is true now: change the sentence, the number, or the marker's target. Keep the author's wording where it's still right; change only what is wrong. Never change code or data to match a doc.",
-                        "4. Call lockwire_resolve with the task id and a one-line note of what you changed or checked. If it is refused, read the reason, fix the doc, and resolve again.",
-                        "5. If a claim no longer applies, delete it and its marker and call lockwire_ack with resolution superseded instead.",
-                        "6. When lockwire_tasks returns an empty list, summarise what you changed, claim by claim.",
-                    ].join("\n"),
+                    text: fixDocsPrompt(scope),
                 },
             },
         ],

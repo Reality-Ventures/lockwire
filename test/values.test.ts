@@ -499,6 +499,13 @@ describe("CSV and TSV value anchors", () => {
     expect(get("analysis=mock&bin=9/tau", long).found).toBe(false);
   });
 
+  it("refuses a column name the header has twice, as a value or as a row condition", () => {
+    const dup = "model,score,score\nx,1,2\n";
+    expect(get("x/score", dup).reason).toBe('the header has 2 columns named "score": rename one, so a key names a single column');
+    expect(get("score=1/model", dup).reason).toMatch(/2 columns named "score"/);
+    expect(get("x/model", dup).value).toBe("x"); // the other columns still resolve
+  });
+
   it("a row key that looks like col=value but isn't one falls back to the first column; ~-escapes work", () => {
     const t = 'label,h,MAE\n"h=4, targets 2013-2016",4,2.06\na/b&c=d~e,4,1.5\n';
     expect(get("h=4, targets 2013-2016/MAE", t).value).toBe(2.06);

@@ -1,0 +1,121 @@
+name: "lockwire autofix"
+description: "Fix the documentation claims lockwire flags with your own agent (Claude Code or Codex); lockwire checks every fix and opens a pull request."
+branding:
+  icon: "edit-3"
+  color: "blue"
+
+# Inputs reach the scripts below only through `env:`, never interpolated into `run:` — so an input
+# can't inject shell. The agent's API key is given to the one step that runs the agent.
+inputs:
+  agent:
+    description: "The agent to run: claude-code or codex."
+    required: false
+    default: "claude-code"
+  anthropic-api-key:
+    description: "Anthropic API key, for agent: claude-code."
+    required: false
+    default: ""
+  openai-api-key:
+    description: "OpenAI API key, for agent: codex."
+    required: false
+    default: ""
+  paths:
+    description: "Only fix claims about (or in) these paths, space-separated. Default: every claim."
+    required: false
+    default: ""
+  changed:
+    description: "true: only fix claims on files changed relative to `base` (needs actions/checkout with fetch-depth: 0)."
+    required: false
+    default: "false"
+  base:
+    description: "The pull request's base branch, and what `changed` compares against. Default: the checked-out branch."
+    required: false
+    default: ""
+  branch:
+    description: "The branch autofix pushes to. Re-runs update the same pull request."
+    required: false
+    default: "lockwire/autofix"
+  max-turns:
+    description: "Turn budget for the agent."
+    required: false
+    default: "40"
+  lockwire-version:
+    description: "The lockwire version to run."
+    required: false
+    default: "latest"
+  github-token:
+    description: "Token used to push the branch and open the pull request (needs contents: write and pull-requests: write)."
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  status:
+    description: "nothing-to-do, fixed, partial or refused."
+    value: ${{ steps.autofix.outputs.status }}
+  pull-request:
+    description: "The pull request's URL, when one was opened or updated."
+    value: ${{ steps.pr.outputs.pull-request }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+
+    - name: Install lockwire and the agent
+      shell: bash
+      env:
+        LW_AGENT: ${{ inputs.agent }}
+        LW_VERSION: ${{ inputs.lockwire-version }}
+      run: |
+        case "$LW_AGENT" in
+          claude-code) npm install -g "lockwire@$LW_VERSION" @anthropic-ai/claude-code ;;
+          codex) npm install -g "lockwire@$LW_VERSION" @openai/codex ;;
+          *) echo "::error::agent must be claude-code or codex, not '$LW_AGENT'"; exit 1 ;;
+        esac
+
+    - id: autofix
+      name: Run the agent on lockwire's work queue
+      shell: bash
+      env:
+        LW_AGENT: ${{ inputs.agent }}
+        LW_PATHS: ${{ inputs.paths }}
+        LW_CHANGED: ${{ inputs.changed }}
+        LW_BASE: ${{ inputs.base }}
+        LW_MAX_TURNS: ${{ inputs.max-turns }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        CODEX_API_KEY: ${{ inputs.openai-api-key }}
+      run: |
+        args=(autofix --agent "$LW_AGENT" --max-turns "$LW_MAX_TURNS" --summary "$RUNNER_TEMP/lockwire-autofix.md" --json)
+        if [ "$LW_CHANGED" = "true" ]; then
+          args+=(--changed)
+          if [ -n "$LW_BASE" ]; then args+=(--base "origin/$LW_BASE"); fi
+        fi
+        if [ -n "$LW_PATHS" ]; then read -r -a paths <<< "$LW_PATHS"; args+=("${paths[@]}"); fi
+        set +e
+        lockwire "${args[@]}" > "$RUNNER_TEMP/lockwire-autofix.json"
+        set -e
+        status=$(node -p "require(process.env.RUNNER_TEMP + '/lockwire-autofix.json').status" 2>/dev/null || echo error)
+        echo "status=$status" >> "$GITHUB_OUTPUT"
+        if [ -f "$RUNNER_TEMP/lockwire-autofix.md" ]; then cat "$RUNNER_TEMP/lockwire-autofix.md" >> "$GITHUB_STEP_SUMMARY"; fi
+        if [ "$status" = "error" ]; then echo "::error::lockwire autofix did not produce a report"; exit 1; fi
+
+    - id: pr
+      name: Open or update the pull request
+      if: steps.autofix.outputs.status == 'fixed' || steps.autofix.outputs.status == 'partial'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        LW_REPORT: ${{ runner.temp }}/lockwire-autofix.json
+        LW_SUMMARY: ${{ runner.temp }}/lockwire-autofix.md
+        LW_BRANCH: ${{ inputs.branch }}
+        LW_BASE: ${{ inputs.base }}
+      run: bash "$GITHUB_ACTION_PATH/open-pr.sh"
+
+    - name: Fail a refused run
+      if: steps.autofix.outputs.status == 'refused'
+      shell: bash
+      run: |
+        echo "::error::lockwire autofix refused this run (the agent changed non-documentation files, or couldn't run): see the job summary"
+        exit 1
