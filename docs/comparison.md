@@ -1,6 +1,6 @@
 # Comparison
 
-Verified against each project's own repository and release history as of September 2026. Corrections welcome — open an issue with a source.
+Verified against each project's own repository and release history as of September 2026, and Mintlify against its own site and docs on 20 October 2026. Corrections welcome — open an issue with a source.
 
 ## Direct comparison
 
@@ -9,7 +9,7 @@ Verified against each project's own repository and release history as of Septemb
 | Mechanism | 4 tiers per symbol (path/sig/body/deps) | 1 AST hash per anchor (XxHash3) | LLM reasoning via subagents, on demand | 1 drift score (0–1) per doc-code pair | Deterministic reference checks (paths, commands) |
 | Write-time agent hook | ✅ Claude Code + Codex | ❌ | ❌ | ❌ | ❌ |
 | History / ledger | ✅ append-only, tamper-evident, `history` query | ❌ | ❌ | ❌ | ❌ |
-| Catches semantic drift (meaning changed, refs still resolve) | ❌ roadmap | ❌ | ✅ (its whole design) | ✅ opt-in, on-demand AI check | ❌ |
+| Catches semantic drift (meaning changed, refs still resolve) | ❌ roadmap, except numbers: a sentence bound to the value it states is checked against it | ❌ | ✅ (its whole design) | ✅ opt-in, on-demand AI check | ❌ |
 | Runs with no LLM, no network | ✅ | ✅ | ❌ | ✅ (core checks; AI check is separate and opt-in) | ✅ |
 | Distribution | npm CLI, Claude Code plugin, `npx skills`, GitHub Action | Homebrew, shell installer, Claude Code/Codex skill | Claude Code plugin only | VS Code extension, npm CLI (`docs-drift`), GitHub Action | pip/pipx |
 | Languages | TS, TSX, JS, Python | TS, Python, Rust, Go, Zig, Java | any (LLM reads the repo) | TS/JS, Python, Go, Rust, Java |Any (path/command checks, not language-aware) |
@@ -35,6 +35,22 @@ Where it stops: one drift score (0–1, with a severity band) per doc-code pair 
 ## agents-md-lint (two independent projects)
 
 Both `openintelligence-labs/agents-md-lint` and `rk-chavali/agents-md-lint` (unrelated, converged on the same name and problem independently, 2026) check whether backticked paths and shell commands referenced in `AGENTS.md`/`CLAUDE.md` actually exist — no tree-sitter, no hashing, deterministic string/filesystem checks only. Both explicitly design around false-positive avoidance (URLs, globs, `~/paths`, placeholders) as the primary constraint, the same lesson ClaudeDrift's README states from the opposite direction. Reference-level only: they can tell you a path is gone, not that a function's contract changed while its path stayed put.
+
+## Mintlify Autopilot
+
+[mintlify.com](https://www.mintlify.com/) is a hosted documentation platform (Starter free; Pro $450/month billed annually, $540 monthly, with 10,000 AI credits a month; Enterprise by quote). On 20 October 2026 it announced [Autopilot](https://www.mintlify.com/blog/autopilot) in beta on Pro and Enterprise: an always-on agent that reads merged code changes and the systems around them (Slack, the project tracker, support tickets, feature flags), drafts documentation updates, opens a pull request and emails a reviewer. It also runs a daily quality check, learns the team's tone from reviewed PRs, and has no prompts to maintain. Each PR it opens or updates costs 250 credits ($2.50 at the overage rate, so about 40 PRs a month on Pro's included credits); runs that find nothing cost nothing. It needs the docs in a Mintlify project on GitHub ([docs](https://www.mintlify.com/docs/autopilot.md): "Autopilot does not support GitLab or other Git providers"). Its older [automations](https://www.mintlify.com/docs/guides/use-automations.md) run a written prompt on a trigger (code change, content change, schedule, integration).
+
+This is the strongest product in the space and it does the thing lockwire deliberately doesn't: **it writes the fix.** lockwire detects and attributes; it never edits a sentence. For a team whose documentation is a Mintlify site, Autopilot will be the default answer to "keep the docs up to date".
+
+Where they differ:
+
+- **Mechanism.** Autopilot is an LLM reading diffs and deciding what to change; nothing binds a sentence to the code it describes. lockwire's binding is explicit and deterministic: the same inputs always give the same verdict, offline, at no per-run cost, and the verdict can gate a merge.
+- **Timing.** Autopilot acts after a merge, in a follow-up PR. lockwire acts before: the `PreToolUse` hook shows the agent which claims cover a file *before* it edits it, `PostToolUse` reports what the edit broke, and `check --changed` fails the PR that broke it.
+- **What's covered.** Autopilot maintains a published docs site. lockwire targets the documents an agent reads as instructions — `CLAUDE.md`, `AGENTS.md`, `docs/**/*.md` in the code repo — and any markdown with markers. We found nothing in Mintlify's docs about maintaining agent-context files in a code repository.
+- **History.** Autopilot's record is its PRs. lockwire keeps a per-claim, tamper-evident ledger (`lockwire history`: how often this claim broke, on which commit, who noticed).
+- **Numbers.** A value anchor checks a stated number against the file it came from, at the stated precision. Autopilot may catch a changed number if it reads the diff that changed it; there's no guarantee either way, and it can't be asked in advance which sentences depend on `results/metrics.json`.
+
+They compose: lockwire's check is a precise, cheap trigger, and a generator like Autopilot or [ClaudeDrift](#claudedrift) is what you'd point at the claims it flags.
 
 ## Why we aren't competing on the hash
 

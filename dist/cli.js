@@ -14,6 +14,7 @@ import { readLockfile, writeLockfile } from "./lockfile.js";
 import { scanMarkers } from "./markers.js";
 import { findRepoRoot, isPathGitignored, toDisplayPath, toRepoPath } from "./repo.js";
 import { DEFAULT_CONFIG } from "./types.js";
+import { dataFormatOf } from "./values.js";
 /** Flags that never take a value, so `check --changed src/a.ts` leaves `src/a.ts` a path. */
 const BOOLEAN_FLAGS = new Set([
     "changed",
@@ -115,7 +116,9 @@ async function main() {
                 const tiers = typeof flags.tiers === "string"
                     ? flags.tiers.split(",")
                     : symbol
-                        ? ["sig"]
+                        ? dataFormatOf(path ?? "")
+                            ? ["value"]
+                            : ["sig"]
                         : ["path", "body"];
                 if (!path)
                     throw new Error("target must be path or path#Symbol");

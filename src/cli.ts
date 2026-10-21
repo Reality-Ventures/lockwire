@@ -27,6 +27,7 @@ import { scanMarkers } from "./markers.js";
 import { findRepoRoot, isPathGitignored, toDisplayPath, toRepoPath } from "./repo.js";
 import type { Tier } from "./types.js";
 import { DEFAULT_CONFIG } from "./types.js";
+import { dataFormatOf } from "./values.js";
 
 /** Flags that never take a value, so `check --changed src/a.ts` leaves `src/a.ts` a path. */
 const BOOLEAN_FLAGS = new Set([
@@ -142,7 +143,9 @@ async function main() {
           typeof flags.tiers === "string"
             ? (flags.tiers.split(",") as Tier[])
             : symbol
-              ? (["sig"] as Tier[])
+              ? dataFormatOf(path ?? "")
+                ? (["value"] as Tier[])
+                : (["sig"] as Tier[])
               : (["path", "body"] as Tier[]);
         if (!path) throw new Error("target must be path or path#Symbol");
         const anchor = await linkLockfileOnly(

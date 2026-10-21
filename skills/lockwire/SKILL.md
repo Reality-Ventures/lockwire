@@ -1,6 +1,6 @@
 ---
 name: lockwire
-description: Use when editing code that CLAUDE.md, AGENTS.md, or a docs/*.md file makes claims about, or when asked to check, link, or fix documentation drift. Binds a documentation claim to a tiered fingerprint (path/signature/body/dependencies) of the code it describes, so an edit that changes what the doc asserts is caught at write time instead of silently.
+description: Use when editing code that CLAUDE.md, AGENTS.md, or a docs/*.md file makes claims about, when writing a number into docs that comes from a results/data file, or when asked to check, link, or fix documentation drift. Binds a documentation claim to a tiered fingerprint (path/signature/body/dependencies) of the code it describes, or to the value it states in a JSON or LaTeX file, so an edit or rerun that makes the doc wrong is caught instead of silently.
 ---
 
 # lockwire
@@ -23,6 +23,17 @@ lockwire link CLAUDE.md
 ```
 
 This stamps the marker with an id and the current fingerprint. Bind `sig` for a contract claim (signature, params, return type), `body` for a behavioral claim ("retries 3x with backoff"), `deps` for an architectural claim ("delegates to the KMS client"), or `path` for a structural claim ("lives in `src/auth/`"). Most prose only needs `sig` — see [docs/concepts.md](../../docs/concepts.md).
+
+## Before writing a number into a doc
+
+If the number comes from a file the code writes (a JSON results file, a LaTeX macros file), bind the sentence to that value instead of typing it in unbound:
+
+```markdown
+<!-- lockwire results/metrics.json#ci.canon.cve.lo -->
+The lower bound of the canonical CVE interval is 0.18.
+```
+
+`lockwire link` refuses if the sentence doesn't match the current value, and `lockwire check` flags it when a rerun moves the value past the precision you wrote (0.18 holds for 0.1834, not for 0.1912). Write the precision you mean, and use one marker per number — stack two markers above a sentence that states a range. Keys are dotted (`a.b.c`, `runs[0].score`); a LaTeX target is the macro name (`paper/numbers.tex#ciCanonCVELo`).
 
 ## When the hook tells you a claim covers code you're about to edit
 

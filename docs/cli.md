@@ -34,9 +34,11 @@ lockwire link
 lockwire link --reviewed
 ```
 
+A marker's target can also be a **value in a data file**: a key in a JSON file (`results/metrics.json#ci.canon.cve.lo`, `runs[0].score`, or a JSON Pointer `#/a.b/c` for keys with dots) or a macro in a LaTeX file (`paper/numbers.tex#ciCanonCVELo`). Such a marker binds the `value` tier by default, and `link` refuses to stamp one whose sentence already states a different value — see [concepts.md](concepts.md#numbers-and-other-values).
+
 ### `lockwire link <doc.md> <target> [--tiers a,b]`
 
-Creates a **lockfile-only** anchor: a whole-doc-to-code binding with no inline marker, for the case where you want a doc bound to a file without annotating a specific paragraph. `target` is `path` or `path#Symbol`. Defaults: `sig` for a symbol target, `path,body` for a file target.
+Creates a **lockfile-only** anchor: a whole-doc-to-code binding with no inline marker, for the case where you want a doc bound to a file without annotating a specific paragraph. `target` is `path` or `path#Symbol` (or `data.json#key`). Defaults: `sig` for a symbol target, `value` for a data key, `path,body` for a file target. With no sentence to check, a lockfile-only value anchor drifts on any change to the value.
 
 ```bash
 lockwire link docs/auth.md src/auth/session.ts#createSession --tiers sig,deps
@@ -82,7 +84,7 @@ single-hash would flag 3 · lockwire flagged 1 · noise −66.7%
 
 `singleHashWouldFlag` counts anchors where *any* of the four tiers changed, regardless of what's bound — an approximation of what a single-hash tool would report. `tieredFlagged` counts anchors where a *bound* tier changed. The gap between them is the false-positive reduction tiering buys you.
 
-`claimChanged` is true when the claim sentence was edited (status `drifted`, `driftedTiers` empty) or its marker was removed (status `orphaned`). A path-scoped run lists only the anchors it examined, and `summary` counts only those. The JSON output follows schema `lockwire.check.v1`:
+`value` is `null` except on a [value anchor](concepts.md#numbers-and-other-values) whose value moved or no longer matches its sentence, where it is `{ "was": "0.1834", "now": "0.1912", "claimed": ["0.18"], "matches": false }`: the value when stamped, the value now, the numbers the sentence states, and whether it still holds. `claimChanged` is true when the claim sentence was edited (status `drifted`, `driftedTiers` empty) or its marker was removed (status `orphaned`). A path-scoped run lists only the anchors it examined, and `summary` counts only those. The JSON output follows schema `lockwire.check.v1`:
 
 ```json
 {
@@ -97,7 +99,7 @@ single-hash would flag 3 · lockwire flagged 1 · noise −66.7%
   },
   "anchors": [
     { "id": "k7q2m9xv", "doc": "CLAUDE.md", "line": 3, "target": "src/auth/session.ts#createSession",
-      "status": "drifted", "driftedTiers": ["sig"], "claimChanged": false,
+      "status": "drifted", "driftedTiers": ["sig"], "claimChanged": false, "value": null,
       "excerpt": "`createSession` takes a `UserId`…" }
   ],
   "unlinked": [

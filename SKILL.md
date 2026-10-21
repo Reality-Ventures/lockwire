@@ -9,7 +9,7 @@ Installed via `npx skills add Reality-Ventures/lockwire` — this copy is agent-
 
 ## What this does
 
-`lockwire.lock` in this repo (if present) binds sentences in `CLAUDE.md`/`AGENTS.md`/`docs/**/*.md` to fingerprints of the code they describe. A fingerprint is computed per **tier** — `path`, `sig` (signature), `body`, `deps` — so a claim bound to `sig` survives a body refactor untouched, and only flags when the actual contract it asserts changes.
+`lockwire.lock` in this repo (if present) binds sentences in `CLAUDE.md`/`AGENTS.md`/`docs/**/*.md` to fingerprints of the code they describe. A fingerprint is computed per **tier** — `path`, `sig` (signature), `body`, `deps` — so a claim bound to `sig` survives a body refactor untouched, and only flags when the actual contract it asserts changes. A sentence that states a number can instead be bound to the value it came from (`<!-- lockwire results/metrics.json#ci.lo -->`, or a LaTeX macro `paper/numbers.tex#ciLo`), and is then checked against that value at the precision it states.
 
 ## Before editing code
 

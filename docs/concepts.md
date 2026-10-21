@@ -29,7 +29,7 @@ A fingerprint is `b3:` followed by 32 lowercase hex characters — the first 128
 
 All four fingerprints are always computed and stored, but only the tiers listed in `tiers` are checked against the claim. The other three are there so `lockwire check` can report the **noise metric** — how many anchors a single-hash tool would have flagged versus how many actually drifted.
 
-## The four tiers
+## The tiers
 
 | Tier | What it hashes | Changes when | Doesn't change when |
 |---|---|---|---|
@@ -37,8 +37,29 @@ All four fingerprints are always computed and stored, but only the tiers listed 
 | `sig` | Symbol kind, name, parameter names and type annotations, return type, modifiers (`export`/`async`/decorators) | The contract changes | Body edits, refactors, reformatting |
 | `body` | A normalized AST of the implementation — comments stripped, local identifiers alpha-renamed | Real behavior changes | Reformatting, renaming a local variable |
 | `deps` | A sorted set of outbound calls and referenced imports | A dependency is added, removed, or swapped | Reordering calls, unrelated body edits |
+| `value` | A value in a data file (a JSON key, a LaTeX macro) — see [below](#numbers-and-other-values) | The value changes **and** the sentence no longer states it | The file is re-serialised or reordered; the value moves within the precision the sentence shows |
 
 A whole-file anchor (no `#Symbol`) binds `path` and `body` by default; a symbol anchor binds `sig` by default. Most prose only needs `sig` — that's the entire point. A doc claiming "takes a `UserId`, returns a `Session`" cares about the contract, not the implementation, and binding `sig` makes it immune to every refactor that doesn't touch the contract.
+
+## Numbers and other values
+
+Most of what goes stale in a research repo, a benchmark README or an ops runbook isn't a function signature — it's a number: "the lower bound is 0.18", "p99 latency is 40 ms", "we evaluate on 1,024 samples". Those numbers usually come from a file the code writes. A value anchor binds the sentence to that file:
+
+```markdown
+<!-- lockwire results/metrics.json#ci.canon.cve.lo -->
+The lower bound of the canonical CVE interval is 0.18.
+
+<!-- lockwire paper/numbers.tex#ciCanonCVELo -->
+The paper reports a lower bound of 0.18.
+```
+
+- **Where the value comes from.** A JSON key (`a.b.c`, `runs[0].score`, or a JSON Pointer `/a.b/c` when a key contains dots), or a LaTeX macro defined with `\newcommand`, `\renewcommand`, `\providecommand` or `\def` — the usual way a pipeline hands numbers to a paper. Common wrappers are unwrapped: `\num{0.18}`, `\SI{12.5}{ms}`, `$0.18$`, `91.2\%`, `12{,}345`.
+- **What is fingerprinted.** The value itself, so a pipeline that re-serialises the file or emits its keys in a different order changes nothing. A whole-file anchor on a JSON file (`results/metrics.json`, no key) is key-order-insensitive for the same reason.
+- **What is checked.** Unlike any other claim, a number can be checked for *truth*: `check` compares the numbers in the sentence with the current value at the precision the sentence shows. "0.18" holds for 0.1834 and for 0.1791, and not for 0.1912; "18%" holds for 0.18; "0.183" is stricter than "0.18". So a rerun that moves the value within the stated precision is **not** drift — the sentence is still true — and one that moves it past it is flagged with both numbers: `(claim says 0.18, value is 0.1912 (was 0.1834))`. A string value (a model name, a mode) is checked by whether the sentence contains it.
+- **Stamping.** `link` refuses to bind a sentence that already states a different value, because that would record a false claim as the baseline. `ack` re-stamps the stored value but can't make a wrong sentence right; fix the sentence, or `waive` it with an expiry.
+- **When there's nothing to compare.** A sentence that states no number ("the bound comes from the canonical run"), a lockfile-only anchor, or a value that isn't a number or string falls back to plain fingerprint drift: any change to the value flags it.
+
+One sentence, one value per marker: a sentence passes if *any* number in it matches, so a range like "0.18–0.24" needs two stacked markers, one per bound, to check both.
 
 ## The claim side of the binding
 
@@ -82,7 +103,7 @@ Being direct about what v0.1 does not do, because a tool that hides its own edge
 - **Same-file rename detection only.** If a symbol is renamed within the same file, `check` looks for exactly one other symbol in that file whose signature matches once the name is ignored (and which no other anchor already binds) and auto-relinks (`anchor.relocated`, counted in `summary.relocated`). Only `sig` is re-stamped: if the rename came with a change to another bound tier, the anchor is reported `drifted` under its new name rather than silently accepted. If the symbol moved to a *different* file, lockwire reports `orphaned`, not `relocated` — a repo-wide symbol index for cross-file matching is a P1 item, not P0.
 - **No cross-language `deps` resolution.** A TypeScript file calling into a Python service (or vice versa) can't be tracked as a dependency; `deps` only sees references resolvable within the same parsed file.
 - **`with ... as` bindings in Python aren't tracked as locals.** A narrow, known gap in the local-declaration collector.
-- **No semantic-claim extraction.** lockwire never reads a claim's *meaning* — only whether the fingerprint of its bound target moved. "We use Redux" staying true when the code has moved to Zustand, with every file path still resolving, is invisible to lockwire by design; that's a job for an LLM-reasoning layer like [ClaudeDrift](https://github.com/marky291/claude-drift), not a hash.
+- **No semantic-claim extraction.** lockwire never reads a claim's *meaning* — only whether the fingerprint of its bound target moved. "We use Redux" staying true when the code has moved to Zustand, with every file path still resolving, is invisible to lockwire by design; that's a job for an LLM-reasoning layer like [ClaudeDrift](https://github.com/marky291/claude-drift), not a hash. The one exception is a number or string bound to the value it came from (a [value anchor](#numbers-and-other-values)), which `check` compares with the sentence directly.
 
 None of these are silent. `lockwire check`'s noise metric and the ledger both make the tool's own behavior auditable, and a false relocate, false orphan, or missed drift is exactly the kind of thing that metric is meant to surface over time.
 

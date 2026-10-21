@@ -3,6 +3,7 @@ import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { check, refs, unlinkedForWithin } from "./actions.js";
 import { readConfig } from "./config.js";
+import { describeDrift } from "./format.js";
 import { isLockwireRepo, toPosix, toRepoRelative, tryFindRepoRoot } from "./repo.js";
 export async function readStdinJson() {
     const chunks = [];
@@ -115,8 +116,8 @@ export async function reportDriftFor(repoRoot, touchedPath, actor) {
     if (relevant.length > 0) {
         const lines = relevant.map((r) => {
             const target = `${r.anchor.target.path}${r.anchor.target.symbol ? `#${r.anchor.target.symbol}` : ""}`;
-            const what = [...r.driftedTiers, ...(r.claimChanged ? ["claim"] : [])];
-            return `- ${r.anchor.doc ?? "(lockfile-only)"} on ${target} is now ${r.status}${what.length ? ` (${what.join(",")})` : ""}`;
+            const what = describeDrift(r);
+            return `- ${r.anchor.doc ?? "(lockfile-only)"} on ${target} is now ${r.status}${what ? ` (${what})` : ""}`;
         });
         sections.push([
             `lockwire: this edit drifted documentation claims:`,

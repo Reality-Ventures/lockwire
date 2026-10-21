@@ -11,6 +11,8 @@ export interface DocMarker {
     claimHash: string;
     claimNormHash: string;
     claimExcerpt: string;
+    /** The whole claim, whitespace-collapsed: what a value anchor's number is checked against. */
+    claimText: string;
 }
 /** Scans a markdown document's text for `<!-- lockwire <target> [tiers] [id=<id>] -->` markers. */
 export declare function scanMarkers(text: string): DocMarker[];

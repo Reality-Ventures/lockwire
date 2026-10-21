@@ -62,6 +62,7 @@ export function scanMarkers(text) {
             claimHash: fingerprint(claimText),
             claimNormHash: fingerprint(flatten(claimText)),
             claimExcerpt: excerpt(claimText),
+            claimText: flatten(claimText),
         });
     }
     return markers;

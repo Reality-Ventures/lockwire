@@ -1,4 +1,4 @@
-export type Tier = "path" | "sig" | "body" | "deps";
+export type Tier = "path" | "sig" | "body" | "deps" | "value";
 export declare const ALL_TIERS: readonly Tier[];
 export type AnchorStatus = "fresh" | "drifted" | "relocated" | "orphaned" | "waived" | "superseded";
 export interface Fingerprints {
@@ -6,7 +6,11 @@ export interface Fingerprints {
     sig: string;
     body: string;
     deps: string;
+    /** The bound value, for a value anchor on a data file (see values.ts). Absent on code anchors and older lockfiles. */
+    value?: string;
 }
+/** A tier's fingerprint, with a missing one (an older lockfile, a code anchor's `value`) read as empty. */
+export declare function tierFingerprint(f: Fingerprints, tier: Tier): string;
 export interface ActorTool {
     name: string;
     version?: string;
@@ -48,6 +52,8 @@ export interface Anchor {
     };
     status: AnchorStatus;
     waiver: Waiver | null;
+    /** For a value anchor: the value as it was when stamped (`0.18`), so drift can say what it moved from. */
+    value?: string;
 }
 export interface Lockfile {
     version: 1;

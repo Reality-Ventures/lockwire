@@ -11,6 +11,8 @@ export interface DocMarker {
   claimHash: string;
   claimNormHash: string;
   claimExcerpt: string;
+  /** The whole claim, whitespace-collapsed: what a value anchor's number is checked against. */
+  claimText: string;
 }
 
 const MARKER_RE = /^<!--\s*lockwire\s+(.+?)\s*-->\s*$/;
@@ -75,6 +77,7 @@ export function scanMarkers(text: string): DocMarker[] {
       claimHash: fingerprint(claimText),
       claimNormHash: fingerprint(flatten(claimText)),
       claimExcerpt: excerpt(claimText),
+      claimText: flatten(claimText),
     });
   }
 

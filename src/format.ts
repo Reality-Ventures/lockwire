@@ -1,4 +1,25 @@
-import type { CheckResult } from "./actions.js";
+import type { AnchorCheckResult, CheckResult } from "./actions.js";
+
+/**
+ * What moved, for a one-line report: `sig`, `claim`, and for a value anchor the value itself —
+ * `value: 0.18 -> 0.19`, or `claim says 0.18, value is 0.19` when the sentence no longer holds.
+ */
+export function describeDrift(
+  r: Pick<AnchorCheckResult, "driftedTiers" | "claimChanged" | "value">,
+): string {
+  const parts: string[] = r.driftedTiers.filter((t) => t !== "value");
+  if (r.claimChanged) parts.push("claim");
+  const v = r.value;
+  if (v && !v.matches)
+    parts.push(
+      `claim says ${v.claimed.length ? v.claimed.join(", ") : "otherwise"}, value is ${v.now}${v.was && v.was !== v.now ? ` (was ${v.was})` : ""}`,
+    );
+  else if (v || r.driftedTiers.includes("value"))
+    parts.push(
+      v?.was !== undefined ? `value: ${v.was} -> ${v?.now}` : `value${v ? `: now ${v.now}` : ""}`,
+    );
+  return parts.join(", ");
+}
 
 const VERSION = "0.1.0";
 
@@ -24,8 +45,8 @@ export function formatText(result: CheckResult): string {
     for (const a of noteworthy) {
       const t = `${a.anchor.target.path}${a.anchor.target.symbol ? `#${a.anchor.target.symbol}` : ""}`;
       const label = a.status.toUpperCase().padEnd(9);
-      const what = [...a.driftedTiers, ...(a.claimChanged ? ["claim"] : [])];
-      const tierNote = what.length ? ` (${what.join(",")})` : "";
+      const what = describeDrift(a);
+      const tierNote = what ? ` (${what})` : "";
       lines.push(`  ${label} ${t}${tierNote}`);
     }
     lines.push("");
@@ -65,6 +86,7 @@ export function formatJson(result: CheckResult, repo: string | null): string {
         status: r.status,
         driftedTiers: r.driftedTiers,
         claimChanged: r.claimChanged ?? false,
+        value: r.value ?? null,
         excerpt: r.anchor.claim?.excerpt ?? null,
       })),
     unlinked: result.unlinked,
@@ -79,15 +101,17 @@ export function formatGithub(result: CheckResult, opts: { failOnUnlinked?: boole
     const target = `${r.anchor.target.path}${r.anchor.target.symbol ? `#${r.anchor.target.symbol}` : ""}`;
     const file = r.anchor.doc ?? r.anchor.target.path;
     const line = r.anchor.claim?.line ?? 1;
-    const what = [...r.driftedTiers, ...(r.claimChanged ? ["claim"] : [])].join(",");
+    const what = describeDrift(r);
     const message =
       r.status === "orphaned"
         ? r.claimChanged
           ? `lockwire: the claim bound to "${target}" was removed from the doc — unlink it or restore the marker`
           : `lockwire: "${target}" no longer exists — this claim is orphaned`
-        : r.claimChanged && r.driftedTiers.length === 0
-          ? `lockwire: the claim text bound to "${target}" was edited — re-verify it against the code, then run lockwire link`
-          : `lockwire: "${target}" drifted on ${what} — this claim may be stale`;
+        : r.value && !r.value.matches
+          ? `lockwire: this claim is wrong now — it states ${r.value.claimed.join(", ") || "a different value"}, but "${target}" is ${r.value.now}`
+          : r.claimChanged && r.driftedTiers.length === 0
+            ? `lockwire: the claim text bound to "${target}" was edited — re-verify it against the code, then run lockwire link`
+            : `lockwire: "${target}" drifted on ${what} — this claim may be stale`;
     lines.push(`::error file=${file},line=${line}::${message}`);
   }
   for (const u of result.unlinked) {

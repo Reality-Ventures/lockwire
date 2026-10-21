@@ -8,16 +8,37 @@ import { fingerprint, fingerprintSet } from "./hash.js";
 import { appendEvent, historyFor, readLedger } from "./ledger.js";
 import { anchorsForPath, lockfilePath, newAnchorId, readLockfile, removeAnchor, upsertAnchor, writeLockfile, } from "./lockfile.js";
 import { claimUnchanged, retargetMarkerLine, scanMarkers, stampMarkerLine, } from "./markers.js";
-import { globToRegExp, isScannedDoc, matchesAny, toRepoRelative, walkFiles, walkFilesWithin, } from "./repo.js";
-import { ALL_TIERS } from "./types.js";
+import { globToRegExp, isScannedDoc, matchesAny, stripBom, toRepoRelative, walkFiles, walkFilesWithin, } from "./repo.js";
+import { ALL_TIERS, tierFingerprint } from "./types.js";
+import { checkClaimAgainstValue, dataFormatOf, resolveValue, valueFingerprintInput, wholeFileContent, } from "./values.js";
 /** Recomputes all four tier fingerprints for a target, or reports it unresolved (file/symbol not found). */
 export async function resolveTarget(repoRoot, target, config) {
     const absPath = `${repoRoot}/${target.path}`;
     if (!existsSync(absPath))
         return null;
+    // A data file (JSON, LaTeX macros): the target is a value in it, not a symbol.
+    const dataFormat = dataFormatOf(target.path);
+    if (dataFormat) {
+        const text = stripBom(await readFile(absPath, "utf8"));
+        const pathFp = fingerprint(target.path);
+        const empty = { path: pathFp, sig: "", body: "", deps: "", value: "" };
+        if (!target.symbol)
+            return {
+                found: true,
+                fingerprints: { ...empty, body: fingerprint(wholeFileContent(text, dataFormat)) },
+            };
+        const v = resolveValue(text, dataFormat, target.symbol);
+        if (!v.found)
+            return { found: false, fingerprints: empty };
+        return {
+            found: true,
+            fingerprints: { ...empty, value: fingerprint(valueFingerprintInput(v.value)) },
+            value: { raw: v.value, display: v.display ?? "" },
+        };
+    }
     const lang = langForPath(target.path);
     if (!lang)
-        throw new Error(`lockwire supports TypeScript, TSX, JavaScript, and Python in P0 — "${target.path}" is none of these`);
+        throw new Error(`lockwire supports TypeScript, TSX, JavaScript, and Python source, and values in JSON and LaTeX (.tex) files — "${target.path}" is none of these`);
     const content = await readFile(absPath, "utf8");
     const parser = await parserFor(lang);
     const tree = parser.parse(content);
@@ -73,6 +94,12 @@ export function findRelocationCandidate(symbols, missingSigFp, oldName, taken = 
             candidates.push(path);
     }
     return candidates.length === 1 ? candidates[0] : null;
+}
+/** Tiers a marker binds when it doesn't say: `value` for a value in a data file, `sig` for a symbol, `path,body` for a file. */
+function defaultTiers(target, resolved) {
+    if (resolved?.value || (target.symbol && dataFormatOf(target.path)))
+        return ["value"];
+    return target.symbol ? ["sig"] : ["path", "body"];
 }
 /** Scans a markdown doc for `<!-- lockwire ... -->` markers and creates/refreshes their anchors. */
 export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
@@ -148,7 +175,7 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
         // Re-stamping a drifted (or orphaned-then-reappeared) anchor accepts code nobody has looked at, so
         // it needs a human's say-so -- unless the code still matches and only the claim sentence moved.
         const codeDrifted = existing !== undefined &&
-            existing.tiers.some((t) => resolved.fingerprints[t] !== existing.fingerprints[t]);
+            existing.tiers.some((t) => tierFingerprint(resolved.fingerprints, t) !== tierFingerprint(existing.fingerprints, t));
         if ((existing?.status === "drifted" || existing?.status === "orphaned") &&
             codeDrifted &&
             !opts.reviewed) {
@@ -158,7 +185,18 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
             });
             continue;
         }
-        const tiers = marker.tiers ?? (target.symbol ? ["sig"] : ["path", "body"]);
+        const tiers = marker.tiers ?? defaultTiers(target, resolved);
+        // Stamping a value anchor whose sentence states a different value would bind a false claim.
+        if (tiers.includes("value") && resolved.value) {
+            const verdict = checkClaimAgainstValue(marker.claimText, resolved.value.raw);
+            if (verdict.checkable && !verdict.matches) {
+                result.skipped.push({
+                    reason: `the claim states ${verdict.claimed.length ? verdict.claimed.join(", ") : "something else"} but ${targetLabel} is ${resolved.value.display}: fix the sentence, then link`,
+                    target: targetLabel,
+                });
+                continue;
+            }
+        }
         const isNew = !marker.id || copiedId;
         const id = isNew || !marker.id ? newAnchorId() : marker.id;
         idsSeenInDoc.add(id);
@@ -179,6 +217,7 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
             linked: { at: new Date().toISOString(), commit, by: actor },
             status: "fresh",
             waiver: null,
+            ...(resolved.value ? { value: resolved.value.display } : {}),
         };
         current = upsertAnchor(current, anchor);
         if (isNew) {
@@ -240,6 +279,7 @@ export async function linkLockfileOnly(repoRoot, docPath, target, tiers, config,
         linked: { at: new Date().toISOString(), commit: null, by: actor },
         status: "fresh",
         waiver: null,
+        ...(resolved.value ? { value: resolved.value.display } : {}),
     };
     await writeLockfile(repoRoot, upsertAnchor(lockfile, anchor));
     await appendEvent(repoRoot, {
@@ -402,6 +442,7 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
         }
         // The other half of the binding: has the sentence itself been rewritten, or its marker removed?
         let claimChanged = false;
+        let claimText;
         if (anchor.doc && anchor.claim) {
             const marker = (await markersIn(anchor.doc))?.find((m) => m.id === anchor.id);
             if (!marker) {
@@ -427,6 +468,7 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
                 continue;
             }
             claimChanged = !claimUnchanged(anchor.claim, marker);
+            claimText = marker.claimText;
             // A claim stamped before `normHash` existed can only be compared by raw text. Now that we've
             // just confirmed it's unchanged, record the whitespace-insensitive hash so a later re-wrap
             // (a formatter pass) can't flag it.
@@ -476,7 +518,9 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
                 // name, and the candidate already matched on it), but any other bound tier that moved is
                 // real drift. Re-stamp only `sig` in that case so the drift stays visible on later checks.
                 const movedTiers = reResolved
-                    ? anchor.tiers.filter((t) => t !== "sig" && reResolved.fingerprints[t] !== anchor.fingerprints[t])
+                    ? anchor.tiers.filter((t) => t !== "sig" &&
+                        tierFingerprint(reResolved.fingerprints, t) !==
+                            tierFingerprint(anchor.fingerprints, t))
                     : [];
                 const relocated = movedTiers.length > 0 && reResolved
                     ? {
@@ -509,8 +553,8 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
                         actor: checkActor,
                         commit: null,
                         tier,
-                        from: anchor.fingerprints[tier],
-                        to: reResolved?.fingerprints[tier] ?? "",
+                        from: tierFingerprint(anchor.fingerprints, tier),
+                        to: reResolved ? tierFingerprint(reResolved.fingerprints, tier) : "",
                     });
                 }
                 results.push({
@@ -542,9 +586,33 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
             }
             continue;
         }
-        const driftedTiers = anchor.tiers.filter((t) => resolved.fingerprints[t] !== anchor.fingerprints[t]);
-        const anyTierChanged = ALL_TIERS.filter((t) => resolved.fingerprints[t] !== anchor.fingerprints[t]);
-        if (driftedTiers.length > 0 || claimChanged) {
+        const moved = (t) => tierFingerprint(resolved.fingerprints, t) !== tierFingerprint(anchor.fingerprints, t);
+        let driftedTiers = anchor.tiers.filter(moved);
+        const anyTierChanged = ALL_TIERS.filter(moved);
+        // A value anchor can be checked for truth: does the sentence still state the value? If it does
+        // (the value moved within the precision the sentence shows), the claim holds and that isn't drift;
+        // if it doesn't, the claim is wrong now, whatever the fingerprint says.
+        let valueReport;
+        let valueHolds = false;
+        if (anchor.tiers.includes("value") && resolved.value) {
+            const verdict = claimText === undefined ? undefined : checkClaimAgainstValue(claimText, resolved.value.raw);
+            const was = anchor.value === undefined ? {} : { was: anchor.value };
+            if (verdict?.checkable && verdict.matches) {
+                valueHolds = true;
+                driftedTiers = driftedTiers.filter((t) => t !== "value");
+            }
+            else if (verdict?.checkable || driftedTiers.includes("value")) {
+                valueReport = {
+                    ...was,
+                    now: resolved.value.display,
+                    claimed: verdict?.claimed ?? [],
+                    matches: !verdict?.checkable,
+                };
+            }
+        }
+        const valueMismatch = valueReport !== undefined && !valueReport.matches;
+        const unchangedForThisClaim = anyTierChanged.every((t) => t === "value" && valueHolds);
+        if (driftedTiers.length > 0 || claimChanged || valueMismatch) {
             const drifted = { ...anchor, status: "drifted" };
             if (anchor.status !== "drifted") {
                 current = upsertAnchor(current, drifted);
@@ -556,8 +624,21 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
                         actor: checkActor,
                         commit: null,
                         tier,
-                        from: anchor.fingerprints[tier],
-                        to: resolved.fingerprints[tier],
+                        from: tierFingerprint(anchor.fingerprints, tier),
+                        to: tierFingerprint(resolved.fingerprints, tier),
+                        ...(tier === "value" && valueReport
+                            ? { note: `${valueReport.was ?? "?"} -> ${valueReport.now}` }
+                            : {}),
+                    });
+                }
+                if (valueMismatch && !driftedTiers.includes("value") && !claimChanged) {
+                    await emit({
+                        ts: now,
+                        event: "anchor.drifted",
+                        anchor: anchor.id,
+                        actor: checkActor,
+                        commit: null,
+                        note: `claim states ${valueReport?.claimed.join(", ")} but the value is ${valueReport?.now}`,
                     });
                 }
                 if (claimChanged) {
@@ -576,11 +657,12 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
                 status: "drifted",
                 driftedTiers,
                 ...(claimChanged ? { claimChanged } : {}),
+                ...(valueReport ? { value: valueReport } : {}),
                 singleHashWouldFlag: anyTierChanged.length > 0,
             });
         }
         else {
-            if (anchor.status === "drifted" && anyTierChanged.length === 0) {
+            if (anchor.status === "drifted" && unchangedForThisClaim) {
                 const resolvedAnchor = { ...anchor, status: "fresh" };
                 current = upsertAnchor(current, resolvedAnchor);
                 await emit({
@@ -674,7 +756,13 @@ export async function ack(repoRoot, anchorId, resolution, note, actor, config) {
                     excerpt: marker.claimExcerpt,
                 };
         }
-        updated = { ...anchor, status: "fresh", fingerprints: resolved.fingerprints, claim };
+        updated = {
+            ...anchor,
+            status: "fresh",
+            fingerprints: resolved.fingerprints,
+            claim,
+            ...(resolved.value ? { value: resolved.value.display } : {}),
+        };
     }
     await writeLockfile(repoRoot, upsertAnchor(lockfile, updated));
     await appendEvent(repoRoot, {

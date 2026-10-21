@@ -5,6 +5,11 @@ export interface TargetResolution {
     found: boolean;
     fingerprints: Fingerprints;
     symbols?: FileSymbols;
+    /** For a value anchor: the value now, and how to show it. */
+    value?: {
+        raw: unknown;
+        display: string;
+    };
 }
 /** Recomputes all four tier fingerprints for a target, or reports it unresolved (file/symbol not found). */
 export declare function resolveTarget(repoRoot: string, target: {
@@ -46,6 +51,16 @@ export interface AnchorCheckResult {
     claimChanged?: boolean;
     /** Outside the scope of a path-limited run: reported with its stored status, not re-examined. */
     skipped?: boolean;
+    /**
+     * For a value anchor whose value moved or no longer matches its sentence: what it was when stamped,
+     * what it is now, the numbers the sentence states, and whether the sentence still holds.
+     */
+    value?: {
+        was?: string;
+        now: string;
+        claimed: string[];
+        matches: boolean;
+    };
     singleHashWouldFlag: boolean;
 }
 export interface CheckSummary {
