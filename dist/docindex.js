@@ -23,7 +23,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { scanMarkers } from "./markers.js";
-import { isScannedDoc, isSkippedEntry, stripBom } from "./repo.js";
+import { isScannedDoc, isSkippedEntry, resolveInsideRepo, stripBom } from "./repo.js";
 const INDEX_VERSION = 1;
 /** Timestamp granularity we guard against: HFS+ is 1 s, FAT 2 s. */
 export const RACY_MS = 2000;
@@ -34,6 +34,8 @@ const parentOf = (rel) => (rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")
 const joinRel = (dir, name) => (dir === "" ? name : `${dir}/${name}`);
 const configKeyOf = (config) => JSON.stringify([config.docs, config.exclude]);
 function tryStat(path) {
+    if (path === null)
+        return null;
     try {
         return statSync(path);
     }
@@ -108,23 +110,46 @@ export async function loadDocIndex(repoRoot, config, opts = {}) {
         wrote: false,
     };
     const configKey = configKeyOf(config);
-    const abs = (rel) => (rel === "" ? repoRoot : join(repoRoot, rel));
+    // Every path comes from the tree or from the cache file, which anyone can edit: never leave the repo.
+    const abs = (rel) => (rel === "" ? repoRoot : resolveInsideRepo(repoRoot, rel));
     const over = () => now() > deadline;
     let data = opts.rebuild ? null : (opts.prior ?? (await readIndexFile(repoRoot)));
     if (data && (data.configKey !== configKey || now() - data.builtAt > MAX_AGE_MS))
         data = null;
+    // An index without its root directory record is incomplete (a build whose root listing failed):
+    // nothing below it would ever be rediscovered, so start over.
+    if (data && !("" in data.dirs))
+        data = null;
+    let sanitized = false;
+    if (data) {
+        // Drop entries the tree walk could never have produced: paths that escape the repo, and docs or
+        // directories the config doesn't select. A hand-edited or hostile cache must not widen the scan.
+        const safe = (k) => !k.includes("\\") && resolveInsideRepo(repoRoot, k) !== null && !k.split("/").includes("..");
+        for (const k of Object.keys(data.docs))
+            if (!safe(k) || !isScannedDoc(k, config)) {
+                delete data.docs[k];
+                sanitized = true;
+            }
+        for (const k of Object.keys(data.dirs))
+            if (k !== "" &&
+                (!safe(k) || k.split("/").some((seg) => isSkippedEntry(seg, k, config.exclude)))) {
+                delete data.dirs[k];
+                sanitized = true;
+            }
+    }
     let complete = true;
-    let changed = false;
+    let changed = sanitized;
     let sawRacy = false;
     const readThisRun = new Set();
     /** Stat, then read: an edit landing in between leaves a newer mtime than we recorded, so it's caught next time. */
     function readDoc(rel) {
-        const st = tryStat(abs(rel));
-        if (!st?.isFile() || !data)
+        const path = abs(rel);
+        const st = tryStat(path);
+        if (!path || !st?.isFile() || !data)
             return;
         let markers;
         try {
-            markers = scanMarkers(readFileSync(abs(rel), "utf8")).map((m) => ({
+            markers = scanMarkers(readFileSync(path, "utf8")).map((m) => ({
                 line: m.line,
                 target: m.target,
                 id: m.id,
@@ -146,9 +171,12 @@ export async function loadDocIndex(repoRoot, config, opts = {}) {
             changed = true;
     }
     function listDir(rel) {
+        const path = abs(rel);
+        if (path === null)
+            return null;
         let entries;
         try {
-            entries = readdirSync(abs(rel), { withFileTypes: true });
+            entries = readdirSync(path, { withFileTypes: true });
         }
         catch {
             return null;

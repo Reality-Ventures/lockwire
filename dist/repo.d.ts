@@ -19,6 +19,14 @@ export declare function walkFiles(repoRoot: string, exclude?: readonly string[])
  * written) anywhere that hasn't.
  */
 export declare function isLockwireRepo(repoRoot: string): boolean;
+/**
+ * The absolute path of `rel` inside `repoRoot`, or null when it escapes the repository: through `..`,
+ * an absolute path, or a symlink that points outside. Paths lockwire reads come from docs, the lockfile
+ * and the doc index, which anyone can edit in a pull request, so every such read goes through this.
+ * A path that doesn't exist yet is returned as is: there's nothing to read.
+ */
+export declare function resolveInsideRepo(repoRoot: string, rel: string): string | null;
+export declare const outsideRepoMessage: (path: string) => string;
 /** Windows editors (and PowerShell's `Out-File`) prepend a UTF-8 BOM that `JSON.parse` rejects. */
 export declare function stripBom(text: string): string;
 /** Windows delivers hook paths with backslashes even under Git Bash. Normalize before any comparison. */

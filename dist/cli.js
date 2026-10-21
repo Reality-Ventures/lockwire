@@ -12,7 +12,7 @@ import { runCodexHook } from "./hook-codex.js";
 import { readLedger, verifyLedger } from "./ledger.js";
 import { readLockfile, writeLockfile } from "./lockfile.js";
 import { scanMarkers } from "./markers.js";
-import { findRepoRoot, isPathGitignored, toDisplayPath, toRepoPath } from "./repo.js";
+import { findRepoRoot, isPathGitignored, resolveInsideRepo, toDisplayPath, toRepoPath, } from "./repo.js";
 import { DEFAULT_CONFIG } from "./types.js";
 import { dataFormatOf } from "./values.js";
 /** Flags that never take a value, so `check --changed src/a.ts` leaves `src/a.ts` a path. */
@@ -90,7 +90,8 @@ async function main() {
                 // No doc named: link every doc the config selects (`docs` / `exclude`) that has markers.
                 const totals = { docs: 0, created: 0, refreshed: 0, skipped: 0 };
                 for (const doc of await discoverDocs(repoRoot, config)) {
-                    if (scanMarkers(await readFile(`${repoRoot}/${doc}`, "utf8")).length === 0)
+                    const abs = resolveInsideRepo(repoRoot, doc);
+                    if (!abs || scanMarkers(await readFile(abs, "utf8")).length === 0)
                         continue;
                     const result = await linkDoc(repoRoot, doc, config, actor, {
                         reviewed: Boolean(flags.reviewed),

@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import * as nodePath from "node:path";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { LockwireConfig } from "./types.js";
 
 const ALWAYS_SKIP = new Set([".git", "node_modules", ".lockwire"]);
@@ -67,6 +67,40 @@ export function isLockwireRepo(repoRoot: string): boolean {
     existsSync(join(repoRoot, ".lockwire", "config.json"))
   );
 }
+
+const within = (root: string, p: string) => {
+  const r = relative(root, p);
+  return r === "" || (r !== ".." && !r.startsWith(`..${sep}`) && !isAbsolute(r));
+};
+
+/**
+ * The absolute path of `rel` inside `repoRoot`, or null when it escapes the repository: through `..`,
+ * an absolute path, or a symlink that points outside. Paths lockwire reads come from docs, the lockfile
+ * and the doc index, which anyone can edit in a pull request, so every such read goes through this.
+ * A path that doesn't exist yet is returned as is: there's nothing to read.
+ */
+export function resolveInsideRepo(repoRoot: string, rel: string): string | null {
+  if (rel === "" || rel.includes("\0") || isAbsolute(rel) || /^[A-Za-z]:/.test(rel)) return null;
+  const root = resolve(repoRoot);
+  const abs = resolve(root, rel);
+  if (!within(root, abs)) return null;
+  let real: string;
+  try {
+    real = realpathSync(abs);
+  } catch {
+    return abs;
+  }
+  let realRoot = root;
+  try {
+    realRoot = realpathSync(root);
+  } catch {
+    // keep the lexical root
+  }
+  return within(realRoot, real) ? abs : null;
+}
+
+export const outsideRepoMessage = (path: string) =>
+  `"${path}" is outside the repository; lockwire only reads files inside it`;
 
 /** Windows editors (and PowerShell's `Out-File`) prepend a UTF-8 BOM that `JSON.parse` rejects. */
 export function stripBom(text: string): string {

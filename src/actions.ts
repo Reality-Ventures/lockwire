@@ -26,6 +26,8 @@ import {
   globToRegExp,
   isScannedDoc,
   matchesAny,
+  outsideRepoMessage,
+  resolveInsideRepo,
   stripBom,
   toRepoRelative,
   walkFiles,
@@ -63,7 +65,8 @@ export async function resolveTarget(
   target: { path: string; symbol?: string },
   config: LockwireConfig,
 ): Promise<TargetResolution | null> {
-  const absPath = `${repoRoot}/${target.path}`;
+  const absPath = resolveInsideRepo(repoRoot, target.path);
+  if (!absPath) throw new Error(outsideRepoMessage(target.path));
   if (!existsSync(absPath)) return null;
 
   // A data file (JSON, LaTeX macros): the target is a value in it, not a symbol.
@@ -177,7 +180,8 @@ export async function linkDoc(
   actor: Actor,
   opts: { reviewed?: boolean; commit?: string | null } = {},
 ): Promise<LinkResult> {
-  const absDoc = `${repoRoot}/${docPath}`;
+  const absDoc = resolveInsideRepo(repoRoot, docPath);
+  if (!absDoc) throw new Error(outsideRepoMessage(docPath));
   const text = await readFile(absDoc, "utf8");
   const markers = scanMarkers(text);
   const lockfile = await readLockfile(repoRoot);
@@ -204,8 +208,9 @@ export async function linkDoc(
       existing = undefined;
     }
     if (existing?.doc && existing.doc !== docPath) {
-      const originalPath = `${repoRoot}/${existing.doc}`;
+      const originalPath = resolveInsideRepo(repoRoot, existing.doc);
       const stillThere =
+        originalPath !== null &&
         existsSync(originalPath) &&
         scanMarkers(await readFile(originalPath, "utf8")).some((m) => m.id === existing?.id);
       if (stillThere) {
@@ -435,8 +440,8 @@ export function markerReader(repoRoot: string) {
   const cache = new Map<string, DocMarker[] | null>();
   return async (doc: string): Promise<DocMarker[] | null> => {
     if (!cache.has(doc)) {
-      const abs = `${repoRoot}/${doc}`;
-      cache.set(doc, existsSync(abs) ? scanMarkers(await readFile(abs, "utf8")) : null);
+      const abs = resolveInsideRepo(repoRoot, doc);
+      cache.set(doc, abs && existsSync(abs) ? scanMarkers(await readFile(abs, "utf8")) : null);
     }
     return cache.get(doc) ?? null;
   };
@@ -662,10 +667,12 @@ export async function check(
     }
 
     let resolved: TargetResolution | null;
+    let unresolvedNote = "file not found";
     try {
       resolved = await resolveTarget(repoRoot, anchor.target, config);
-    } catch {
+    } catch (err) {
       resolved = null;
+      unresolvedNote = err instanceof Error ? err.message : String(err);
     }
 
     if (!resolved) {
@@ -678,7 +685,7 @@ export async function check(
           anchor: anchor.id,
           actor: checkActor,
           commit: null,
-          note: "file not found",
+          note: unresolvedNote,
         });
       }
       results.push({
@@ -966,10 +973,9 @@ export async function ack(
 
     // Acknowledging also accepts the claim as it reads now, so an expected claim edit stops being flagged.
     let claim = anchor.claim;
-    if (anchor.doc && anchor.claim && existsSync(`${repoRoot}/${anchor.doc}`)) {
-      const marker = scanMarkers(await readFile(`${repoRoot}/${anchor.doc}`, "utf8")).find(
-        (m) => m.id === anchor.id,
-      );
+    const docAbs = anchor.doc ? resolveInsideRepo(repoRoot, anchor.doc) : null;
+    if (anchor.doc && anchor.claim && docAbs && existsSync(docAbs)) {
+      const marker = scanMarkers(await readFile(docAbs, "utf8")).find((m) => m.id === anchor.id);
       if (marker)
         claim = {
           line: marker.claimLine,

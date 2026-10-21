@@ -8,12 +8,14 @@ import { fingerprint, fingerprintSet } from "./hash.js";
 import { appendEvent, historyFor, readLedger } from "./ledger.js";
 import { anchorsForPath, lockfilePath, newAnchorId, readLockfile, removeAnchor, upsertAnchor, writeLockfile, } from "./lockfile.js";
 import { claimUnchanged, retargetMarkerLine, scanMarkers, stampMarkerLine, } from "./markers.js";
-import { globToRegExp, isScannedDoc, matchesAny, stripBom, toRepoRelative, walkFiles, walkFilesWithin, } from "./repo.js";
+import { globToRegExp, isScannedDoc, matchesAny, outsideRepoMessage, resolveInsideRepo, stripBom, toRepoRelative, walkFiles, walkFilesWithin, } from "./repo.js";
 import { ALL_TIERS, tierFingerprint } from "./types.js";
 import { checkClaimAgainstValue, dataFormatOf, resolveValue, valueFingerprintInput, wholeFileContent, } from "./values.js";
 /** Recomputes all four tier fingerprints for a target, or reports it unresolved (file/symbol not found). */
 export async function resolveTarget(repoRoot, target, config) {
-    const absPath = `${repoRoot}/${target.path}`;
+    const absPath = resolveInsideRepo(repoRoot, target.path);
+    if (!absPath)
+        throw new Error(outsideRepoMessage(target.path));
     if (!existsSync(absPath))
         return null;
     // A data file (JSON, LaTeX macros): the target is a value in it, not a symbol.
@@ -103,7 +105,9 @@ function defaultTiers(target, resolved) {
 }
 /** Scans a markdown doc for `<!-- lockwire ... -->` markers and creates/refreshes their anchors. */
 export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
-    const absDoc = `${repoRoot}/${docPath}`;
+    const absDoc = resolveInsideRepo(repoRoot, docPath);
+    if (!absDoc)
+        throw new Error(outsideRepoMessage(docPath));
     const text = await readFile(absDoc, "utf8");
     const markers = scanMarkers(text);
     const lockfile = await readLockfile(repoRoot);
@@ -128,8 +132,9 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
             existing = undefined;
         }
         if (existing?.doc && existing.doc !== docPath) {
-            const originalPath = `${repoRoot}/${existing.doc}`;
-            const stillThere = existsSync(originalPath) &&
+            const originalPath = resolveInsideRepo(repoRoot, existing.doc);
+            const stillThere = originalPath !== null &&
+                existsSync(originalPath) &&
                 scanMarkers(await readFile(originalPath, "utf8")).some((m) => m.id === existing?.id);
             if (stillThere) {
                 copiedId = true;
@@ -296,8 +301,8 @@ export function markerReader(repoRoot) {
     const cache = new Map();
     return async (doc) => {
         if (!cache.has(doc)) {
-            const abs = `${repoRoot}/${doc}`;
-            cache.set(doc, existsSync(abs) ? scanMarkers(await readFile(abs, "utf8")) : null);
+            const abs = resolveInsideRepo(repoRoot, doc);
+            cache.set(doc, abs && existsSync(abs) ? scanMarkers(await readFile(abs, "utf8")) : null);
         }
         return cache.get(doc) ?? null;
     };
@@ -478,11 +483,13 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
             }
         }
         let resolved;
+        let unresolvedNote = "file not found";
         try {
             resolved = await resolveTarget(repoRoot, anchor.target, config);
         }
-        catch {
+        catch (err) {
             resolved = null;
+            unresolvedNote = err instanceof Error ? err.message : String(err);
         }
         if (!resolved) {
             const orphaned = { ...anchor, status: "orphaned" };
@@ -494,7 +501,7 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
                     anchor: anchor.id,
                     actor: checkActor,
                     commit: null,
-                    note: "file not found",
+                    note: unresolvedNote,
                 });
             }
             results.push({
@@ -746,8 +753,9 @@ export async function ack(repoRoot, anchorId, resolution, note, actor, config) {
             throw new Error(`can't mark ${anchorId} ${resolution}: ${anchor.target.path}${anchor.target.symbol ? `#${anchor.target.symbol}` : ""} no longer exists. Use --resolution superseded, or \`lockwire unlink ${anchorId}\`.`);
         // Acknowledging also accepts the claim as it reads now, so an expected claim edit stops being flagged.
         let claim = anchor.claim;
-        if (anchor.doc && anchor.claim && existsSync(`${repoRoot}/${anchor.doc}`)) {
-            const marker = scanMarkers(await readFile(`${repoRoot}/${anchor.doc}`, "utf8")).find((m) => m.id === anchor.id);
+        const docAbs = anchor.doc ? resolveInsideRepo(repoRoot, anchor.doc) : null;
+        if (anchor.doc && anchor.claim && docAbs && existsSync(docAbs)) {
+            const marker = scanMarkers(await readFile(docAbs, "utf8")).find((m) => m.id === anchor.id);
             if (marker)
                 claim = {
                     line: marker.claimLine,
