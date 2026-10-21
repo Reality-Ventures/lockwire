@@ -17,10 +17,127 @@ const DATA_EXTENSIONS = {
     ".tex": "tex",
     ".sty": "tex",
     ".ltx": "tex",
+    ".csv": "csv",
+    ".tsv": "tsv",
 };
 export function dataFormatOf(path) {
     const dot = path.lastIndexOf(".");
     return dot < 0 ? undefined : DATA_EXTENSIONS[path.slice(dot).toLowerCase()];
+}
+// ---------------------------------------------------------------------------------------------
+// CSV and TSV
+/** RFC 4180 rows: quoted fields, `""` escapes, embedded delimiters and newlines, CRLF or LF. */
+export function parseDelimited(text, delimiter) {
+    const rows = [];
+    let row = [];
+    let field = "";
+    let quoted = false;
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (quoted) {
+            if (c === '"' && text[i + 1] === '"') {
+                field += '"';
+                i++;
+            }
+            else if (c === '"')
+                quoted = false;
+            else
+                field += c;
+        }
+        else if (c === '"' && field === "")
+            quoted = true;
+        else if (c === delimiter) {
+            row.push(field);
+            field = "";
+        }
+        else if (c === "\n" || c === "\r") {
+            if (c === "\r" && text[i + 1] === "\n")
+                i++;
+            row.push(field);
+            rows.push(row);
+            row = [];
+            field = "";
+        }
+        else
+            field += c;
+    }
+    if (field !== "" || row.length > 0) {
+        row.push(field);
+        rows.push(row);
+    }
+    return rows.filter((r) => !(r.length === 1 && r[0] === ""));
+}
+const unescapePart = (s) => s.replace(/~1/g, "/").replace(/~2/g, "&").replace(/~3/g, "=").replace(/~0/g, "~");
+/** A cell as a value: a number when it is one (thousands separators allowed), otherwise the text; empty is null. */
+function cellValue(cell) {
+    const t = cell.trim();
+    if (t === "")
+        return null;
+    if (/^[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?$|^[-+]?\.\d+$/.test(t))
+        return Number(t.replace(/,/g, ""));
+    return t;
+}
+/**
+ * A cell of a table with a header row. `key` is `<column>=<value>/<column>` (the row whose column
+ * equals value; join several with `&`), `@<n>/<column>` (the nth data row), `<row>/<column>` (the row
+ * whose first column is `row`), or `<column>` alone for a one-row table. `~1`, `~2`, `~3` and `~0`
+ * escape `/`, `&`, `=` and `~` in a part.
+ */
+function tableValue(text, delimiter, key) {
+    const [header, ...rows] = parseDelimited(text, delimiter);
+    if (!header)
+        return { found: false, reason: "the table is empty" };
+    const cut = key.lastIndexOf("/");
+    const column = unescapePart(cut < 0 ? key : key.slice(cut + 1));
+    const rowSel = cut < 0 ? null : key.slice(0, cut);
+    const col = header.findIndex((h) => h.trim() === column);
+    if (col < 0)
+        return {
+            found: false,
+            reason: `no column "${column}" (the header is ${header.map((h) => h.trim()).join(", ")})`,
+        };
+    let matches;
+    if (rowSel === null) {
+        if (rows.length !== 1)
+            return {
+                found: false,
+                reason: `the table has ${rows.length} rows: name one, as <row>/${column}`,
+            };
+        matches = rows;
+    }
+    else if (/^@\d+$/.test(rowSel)) {
+        const n = Number(rowSel.slice(1));
+        matches = n >= 1 && n <= rows.length ? [rows[n - 1]] : [];
+    }
+    else {
+        // `col=value&col2=value2`: every condition must hold. A lone part that isn't `<header>=…` (or
+        // matches nothing that way) is the first column's value — `h=4, targets 2013-2016` is a row key.
+        const parts = rowSel.split("&");
+        const conditions = parts.map((part) => {
+            const eq = part.indexOf("=");
+            const c = eq < 0 ? -1 : header.findIndex((h) => h.trim() === unescapePart(part.slice(0, eq)));
+            return c >= 0 ? { col: c, wanted: unescapePart(part.slice(eq + 1)) } : null;
+        });
+        const byConditions = conditions.every((c) => c !== null)
+            ? rows.filter((r) => conditions.every((c) => (r[c.col] ?? "").trim() === c.wanted))
+            : [];
+        matches =
+            byConditions.length > 0 || parts.length > 1
+                ? byConditions
+                : rows.filter((r) => (r[0] ?? "").trim() === unescapePart(rowSel));
+    }
+    if (matches.length === 0)
+        return { found: false, reason: `no row ${rowSel}` };
+    if (matches.length > 1)
+        return {
+            found: false,
+            reason: `${matches.length} rows match ${rowSel}: use a column that identifies one, as <column>=<value>/${column}`,
+        };
+    const cell = matches[0]?.[col];
+    if (cell === undefined)
+        return { found: false, reason: `row ${rowSel} has no ${column} cell` };
+    const value = cellValue(cell);
+    return { found: true, value, display: displayValue(value) };
 }
 /** `a.b[0].c`, `a.b.0.c`, or a JSON Pointer (`/a/b/0/c`, for keys that contain dots). */
 function jsonPath(key) {
@@ -118,6 +235,8 @@ function texToPlain(s) {
 }
 /** Looks up `key` in the data file's text. Throws only on a file that can't be parsed at all. */
 export function resolveValue(text, format, key) {
+    if (format === "csv" || format === "tsv")
+        return tableValue(text, format === "csv" ? "," : "\t", key);
     if (format === "tex") {
         const macros = texMacros(text);
         const name = key.replace(/^\\/, "");

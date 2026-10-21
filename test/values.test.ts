@@ -467,3 +467,72 @@ describe("ranges: the unit written once on the upper bound applies to the lower 
     expect(holds("the share is 28.8% (25.0–33.6%).", 0.23999547511312216)).toBe(false);
   });
 });
+
+describe("CSV and TSV value anchors", () => {
+  const SCORES = 'model,accuracy,latency_ms,notes\r\ngpt-4,0.912,"1,204","has, comma"\nllama-3,0.874,830,\nllama-3,0.871,812,"a ""quoted"" note"\n';
+  const get = (key: string, text = SCORES, fmt: "csv" | "tsv" = "csv") => resolveValue(text, fmt, key);
+
+  it("reads RFC 4180: quoted fields, embedded commas, doubled quotes, CRLF and LF, thousands separators", () => {
+    expect(get("gpt-4/accuracy")).toMatchObject({ found: true, value: 0.912 });
+    expect(get("gpt-4/latency_ms").value).toBe(1204);
+    expect(get("gpt-4/notes").value).toBe("has, comma");
+    expect(get("notes=a \"quoted\" note/accuracy").value).toBe(0.871);
+    expect(get("llama-3/notes")).toMatchObject({ found: false }); // two llama-3 rows
+    expect(get("@2/notes")).toMatchObject({ found: true, value: null }); // an empty cell
+  });
+
+  it("selects a row by its first column, by column=value (joined with &), or by position", () => {
+    const long = "analysis,bin,tau\nmock,1,0.1\nmock,2,-0.168\nreal,2,0.3\n";
+    expect(get("analysis=mock&bin=2/tau", long).value).toBe(-0.168);
+    expect(get("bin=2&analysis=real/tau", long).value).toBe(0.3);
+    expect(get("real/tau", long).value).toBe(0.3);
+    expect(get("@1/tau", long).value).toBe(0.1);
+    expect(get("tau", "a,tau\nx,7\n").value).toBe(7); // a one-row table needs no row
+  });
+
+  it("refuses an ambiguous or missing row or column, and says why", () => {
+    const long = "analysis,bin,tau\nmock,1,0.1\nmock,2,-0.168\n";
+    expect(get("mock/tau", long).reason).toBe("2 rows match mock: use a column that identifies one, as <column>=<value>/tau");
+    expect(get("mock/nope", long).reason).toMatch(/no column "nope" \(the header is analysis, bin, tau\)/);
+    expect(get("tau", long).reason).toMatch(/has 2 rows/);
+    expect(get("@9/tau", long).found).toBe(false);
+    expect(get("analysis=mock&bin=9/tau", long).found).toBe(false);
+  });
+
+  it("a row key that looks like col=value but isn't one falls back to the first column; ~-escapes work", () => {
+    const t = 'label,h,MAE\n"h=4, targets 2013-2016",4,2.06\na/b&c=d~e,4,1.5\n';
+    expect(get("h=4, targets 2013-2016/MAE", t).value).toBe(2.06);
+    expect(get("a~1b~2c~3d~0e/MAE", t).value).toBe(1.5);
+  });
+
+  it("TSV is the same with tabs, and .csv/.tsv are data files", () => {
+    expect(get("x/b", "a\tb\nx\t1.5\n", "tsv").value).toBe(1.5);
+    expect(dataFormatOf("results/scores.csv")).toBe("csv");
+    expect(dataFormatOf("results/scores.TSV")).toBe("tsv");
+  });
+
+  it("end to end: a quoted target with spaces links, a rerun that moves the cell is flagged, a reordered file is not", async () => {
+    const dir = await repo({
+      "results/main.csv": "analysis,term,est\nE1 collection S,low,-0.98\nE1 collection S,high,0.41\n",
+      "CLAUDE.md": '# R\n\n<!-- lockwire "results/main.csv#analysis=E1 collection S&term=low/est" -->\nThe low-term estimate is −0.98.\n',
+    });
+    const linked = await linkDoc(dir, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    expect(linked.created).toBe(1);
+    expect(await readFile(join(dir, "CLAUDE.md"), "utf8")).toMatch(/^<!-- lockwire "results\/main\.csv#analysis=E1 collection S&term=low\/est" id=\w+ -->$/m);
+    await writeFile(join(dir, "results/main.csv"), "analysis,term,est\nE1 collection S,high,0.41\nE1 collection S,low,-0.98\n", "utf8");
+    expect((await check(dir, DEFAULT_CONFIG)).summary.drifted).toBe(0); // rows reordered, value unchanged
+    await writeFile(join(dir, "results/main.csv"), "analysis,term,est\nE1 collection S,low,-1.27\nE1 collection S,high,0.41\n", "utf8");
+    const [r] = (await check(dir, DEFAULT_CONFIG)).results;
+    expect(r?.value).toMatchObject({ now: "-1.27", matches: false });
+  });
+
+  it("an ambiguous row key is refused at link with the reason", async () => {
+    const dir = await repo({
+      "results/long.csv": "kind,bin,tau\nmock,1,0.1\nmock,2,0.2\n",
+      "CLAUDE.md": "# R\n\n<!-- lockwire results/long.csv#mock/tau -->\nTau is 0.1.\n",
+    });
+    const r = await linkDoc(dir, "CLAUDE.md", DEFAULT_CONFIG, actor);
+    expect(r.created).toBe(0);
+    expect(r.skipped[0]?.reason).toBe("target not found: 2 rows match mock: use a column that identifies one, as <column>=<value>/tau");
+  });
+});

@@ -3,6 +3,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release workflow runs these same jobs and publishes only if they pass.
+  workflow_call:
 
 jobs:
   test:

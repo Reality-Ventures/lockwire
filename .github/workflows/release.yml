@@ -1,7 +1,9 @@
 name: Release
 
-# Every push to main publishes to npm. The version is computed in CI (scripts/next-version.mjs) and
-# never committed back. Put [skip ci] in a commit message to push without publishing.
+# Every push to main publishes to npm, but only after the full CI suite (ci.yml, Ubuntu and Windows)
+# passes on that commit: a red CI run never reaches npm. The version is computed here
+# (scripts/next-version.mjs) and never committed back. Put [skip ci] in a commit message to push
+# without publishing.
 on:
   push:
     branches: [main]
@@ -11,7 +13,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   publish:
+    needs: ci
     runs-on: ubuntu-latest
     permissions:
       contents: read

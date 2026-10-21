@@ -10,6 +10,8 @@ export interface TargetResolution {
         raw: unknown;
         display: string;
     };
+    /** When not found and there's more to say (an ambiguous CSV row, a missing column). */
+    reason?: string;
 }
 /** Recomputes all four tier fingerprints for a target, or reports it unresolved (file/symbol not found). */
 export declare function resolveTarget(repoRoot: string, target: {

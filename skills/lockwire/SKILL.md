@@ -33,7 +33,7 @@ If the number comes from a file the code writes (a JSON results file, a LaTeX ma
 The lower bound of the canonical CVE interval is 0.18.
 ```
 
-`lockwire link` refuses if the sentence doesn't match the current value, and `lockwire check` flags it when a rerun moves the value past the precision you wrote (0.18 holds for 0.1834, not for 0.1912). Write the precision you mean, and use one marker per number — stack two markers above a sentence that states a range. Keys are dotted (`a.b.c`, `runs[0].score`); a LaTeX target is the macro name (`paper/numbers.tex#ciCanonCVELo`).
+`lockwire link` refuses if the sentence doesn't match the current value, and `lockwire check` flags it when a rerun moves the value past the precision you wrote (0.18 holds for 0.1834, not for 0.1912). Write the precision you mean, and use one marker per number — stack two markers above a sentence that states a range. Keys are dotted (`a.b.c`, `runs[0].score`); a LaTeX target is the macro name (`paper/numbers.tex#ciCanonCVELo`); a CSV/TSV cell is `<row>/<column>` by its first column (`results/scores.csv#gpt-4/accuracy`) or `col=value&col2=value2/<column>` when rows repeat. Quote the whole target if it has spaces.
 
 ## When the hook tells you a claim covers code you're about to edit
 

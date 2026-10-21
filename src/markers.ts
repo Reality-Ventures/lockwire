@@ -49,7 +49,7 @@ export function scanMarkers(text: string): DocMarker[] {
     if (fence) continue;
     const m = MARKER_RE.exec(line.trim());
     if (!m) continue;
-    const tokens = (m[1] ?? "").split(/\s+/).filter(Boolean);
+    const tokens = markerTokens(m[1] ?? "").map((t) => t.value);
     const targetToken = tokens[0];
     if (!targetToken) continue;
 
@@ -63,7 +63,9 @@ export function scanMarkers(text: string): DocMarker[] {
       }
     }
 
-    const [rawPath, symbol] = targetToken.split("#");
+    const hash = targetToken.indexOf("#");
+    const rawPath = hash < 0 ? targetToken : targetToken.slice(0, hash);
+    const symbol = hash < 0 ? undefined : targetToken.slice(hash + 1);
     if (!rawPath) continue;
     // `./src/a.ts` and `src/./a.ts` are claims about src/a.ts: normalise the way the hooks compare.
     const path = posix.normalize(rawPath.replace(/\\/g, "/")).replace(/^(?:\.\/)+/, "");
@@ -163,7 +165,9 @@ export function stampMarkerLine(line: string, id: string): string {
   const m = MARKER_RE.exec(line.trim());
   if (!m) return line;
   const prefix = /^\s*/.exec(line)?.[0] ?? "";
-  const tokens = (m[1] ?? "").split(/\s+/).filter((t) => !t.startsWith("id="));
+  const tokens = markerTokens(m[1] ?? "")
+    .filter((t, i) => i === 0 || !t.value.startsWith("id="))
+    .map((t) => t.raw);
   tokens.push(`id=${id}`);
   return `${prefix}<!-- lockwire ${tokens.join(" ")} -->`;
 }
@@ -176,7 +180,26 @@ export function retargetMarkerLine(
   const m = MARKER_RE.exec(line.trim());
   if (!m) return line;
   const prefix = /^\s*/.exec(line)?.[0] ?? "";
-  const tokens = (m[1] ?? "").split(/\s+/).filter(Boolean);
-  tokens[0] = `${target.path}${target.symbol ? `#${target.symbol}` : ""}`;
+  const tokens = markerTokens(m[1] ?? "").map((t) => t.raw);
+  tokens[0] = quoteTarget(`${target.path}${target.symbol ? `#${target.symbol}` : ""}`);
   return `${prefix}<!-- lockwire ${tokens.join(" ")} -->`;
+}
+
+/**
+ * A marker's words: split on whitespace, except that a double-quoted word keeps its spaces — a target
+ * like `"results/main.csv#E1 collection S/est"`, whose CSV row key has spaces. `\"` is a literal quote.
+ */
+export function markerTokens(body: string): { value: string; raw: string }[] {
+  const out: { value: string; raw: string }[] = [];
+  const re = /"((?:\\.|[^"\\])*)"|(\S+)/g;
+  for (let m = re.exec(body); m; m = re.exec(body)) {
+    if (m[1] !== undefined) out.push({ value: m[1].replace(/\\(.)/g, "$1"), raw: m[0] });
+    else out.push({ value: m[2] ?? "", raw: m[0] });
+  }
+  return out;
+}
+
+/** A target as a marker word: quoted when it has whitespace or quotes in it. */
+export function quoteTarget(target: string): string {
+  return /[\s"]/.test(target) ? `"${target.replace(/(["\\])/g, "\\$1")}"` : target;
 }

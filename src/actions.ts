@@ -58,6 +58,8 @@ export interface TargetResolution {
   symbols?: FileSymbols;
   /** For a value anchor: the value now, and how to show it. */
   value?: { raw: unknown; display: string };
+  /** When not found and there's more to say (an ambiguous CSV row, a missing column). */
+  reason?: string;
 }
 
 /** Recomputes all four tier fingerprints for a target, or reports it unresolved (file/symbol not found). */
@@ -94,7 +96,8 @@ export async function resolveTargetInText(
         source: text,
       };
     const v = resolveValue(text, dataFormat, target.symbol);
-    if (!v.found) return { found: false, fingerprints: empty };
+    if (!v.found)
+      return { found: false, fingerprints: empty, ...(v.reason ? { reason: v.reason } : {}) };
     return {
       found: true,
       fingerprints: { ...empty, value: fingerprint(valueFingerprintInput(v.value)) },
@@ -296,7 +299,10 @@ export async function linkDoc(
       }
     }
     if (!resolved || !resolved.found) {
-      result.skipped.push({ reason: "target not found", target: targetLabel });
+      result.skipped.push({
+        reason: resolved?.reason ? `target not found: ${resolved.reason}` : "target not found",
+        target: targetLabel,
+      });
       continue;
     }
 

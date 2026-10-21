@@ -30,4 +30,14 @@ export declare function retargetMarkerLine(line: string, target: {
     path: string;
     symbol?: string;
 }): string;
+/**
+ * A marker's words: split on whitespace, except that a double-quoted word keeps its spaces — a target
+ * like `"results/main.csv#E1 collection S/est"`, whose CSV row key has spaces. `\"` is a literal quote.
+ */
+export declare function markerTokens(body: string): {
+    value: string;
+    raw: string;
+}[];
+/** A target as a marker word: quoted when it has whitespace or quotes in it. */
+export declare function quoteTarget(target: string): string;
 //# sourceMappingURL=markers.d.ts.map

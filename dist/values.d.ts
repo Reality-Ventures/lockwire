@@ -1,11 +1,15 @@
-export type DataFormat = "json" | "tex";
+export type DataFormat = "json" | "tex" | "csv" | "tsv";
 export declare function dataFormatOf(path: string): DataFormat | undefined;
 export interface ResolvedValue {
     found: boolean;
     value?: unknown;
     /** The value as a person would write it, for messages: `0.18`, `"advisory"`. */
     display?: string;
+    /** Why it wasn't found, when there's more to say than "not there" (an ambiguous row, say). */
+    reason?: string;
 }
+/** RFC 4180 rows: quoted fields, `""` escapes, embedded delimiters and newlines, CRLF or LF. */
+export declare function parseDelimited(text: string, delimiter: string): string[][];
 /** Looks up `key` in the data file's text. Throws only on a file that can't be parsed at all. */
 export declare function resolveValue(text: string, format: DataFormat, key: string): ResolvedValue;
 /** A stable serialisation of the value for fingerprinting: key order never matters. */

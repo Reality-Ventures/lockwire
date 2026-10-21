@@ -179,3 +179,24 @@ describe("claimUnchanged for anchors stamped before normHash existed", () => {
     expect(claimUnchanged(stored, scan(long))).toBe(true);
   });
 });
+
+describe("quoted marker targets (keys with spaces)", () => {
+  it("a double-quoted target keeps its spaces; tiers and id still parse", () => {
+    const [m] = scanMarkers('<!-- lockwire "results/main.csv#E1 collection S/est" value id=abcd1234 -->\nA claim.\n');
+    expect(m?.target).toEqual({ path: "results/main.csv", symbol: "E1 collection S/est" });
+    expect(m?.tiers).toEqual(["value"]);
+    expect(m?.id).toBe("abcd1234");
+  });
+
+  it("stamping keeps the quotes; retargeting quotes a target that needs it and not one that doesn't", async () => {
+    const { retargetMarkerLine } = await import("../src/markers.js");
+    expect(stampMarkerLine('<!-- lockwire "t.csv#a b/c" -->', "abcd1234")).toBe('<!-- lockwire "t.csv#a b/c" id=abcd1234 -->');
+    expect(retargetMarkerLine("<!-- lockwire t.csv#x sig id=abcd1234 -->", { path: "t.csv", symbol: "a b/c" })).toBe('<!-- lockwire "t.csv#a b/c" sig id=abcd1234 -->');
+    expect(retargetMarkerLine('<!-- lockwire "t.csv#a b" id=abcd1234 -->', { path: "src/a.ts", symbol: "f" })).toBe("<!-- lockwire src/a.ts#f id=abcd1234 -->");
+  });
+
+  it("a quote inside a quoted target is escaped, and a # in the key is kept", () => {
+    const [m] = scanMarkers('<!-- lockwire "t.csv#say \\"hi\\"/c#2" -->\nx.\n');
+    expect(m?.target).toEqual({ path: "t.csv", symbol: 'say "hi"/c#2' });
+  });
+});

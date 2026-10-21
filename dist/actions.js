@@ -39,7 +39,7 @@ export async function resolveTargetInText(target, content, config) {
             };
         const v = resolveValue(text, dataFormat, target.symbol);
         if (!v.found)
-            return { found: false, fingerprints: empty };
+            return { found: false, fingerprints: empty, ...(v.reason ? { reason: v.reason } : {}) };
         return {
             found: true,
             fingerprints: { ...empty, value: fingerprint(valueFingerprintInput(v.value)) },
@@ -205,7 +205,10 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
             }
         }
         if (!resolved || !resolved.found) {
-            result.skipped.push({ reason: "target not found", target: targetLabel });
+            result.skipped.push({
+                reason: resolved?.reason ? `target not found: ${resolved.reason}` : "target not found",
+                target: targetLabel,
+            });
             continue;
         }
         // Re-stamping a drifted (or orphaned-then-reappeared) anchor accepts code nobody has looked at, so
