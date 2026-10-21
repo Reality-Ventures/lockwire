@@ -10,9 +10,9 @@ import { ensureLockwireGitignore, indexPath, loadDocIndex } from "./docindex.js"
 import { formatGithub, formatJson, formatText } from "./format.js";
 import { runClaudeHook } from "./hook-claude.js";
 import { runCodexHook } from "./hook-codex.js";
-import { readLedger, verifyLedger } from "./ledger.js";
+import { verifyLedger } from "./ledger.js";
 import { withRepoLock } from "./lock.js";
-import { readLockfile, writeLockfile } from "./lockfile.js";
+import { writeLockfile } from "./lockfile.js";
 import { scanMarkers } from "./markers.js";
 import { findRepoRoot, isPathGitignored, resolveInsideRepo, toDisplayPath, toRepoPath, } from "./repo.js";
 import { listTasks, resolveTask, taskContext } from "./tasks.js";

@@ -138,9 +138,11 @@ function tableValue(text: string, delimiter: string, key: string): ResolvedValue
       const c = eq < 0 ? -1 : (columns(unescapePart(part.slice(0, eq)))[0] ?? -1);
       return c >= 0 ? { col: c, wanted: unescapePart(part.slice(eq + 1)) } : null;
     });
-    const byConditions = conditions.every((c) => c !== null)
-      ? rows.filter((r) => conditions.every((c) => (r[c!.col] ?? "").trim() === c!.wanted))
-      : [];
+    const met = conditions.filter((c) => c !== null);
+    const byConditions =
+      met.length === conditions.length
+        ? rows.filter((r) => met.every((c) => (r[c.col] ?? "").trim() === c.wanted))
+        : [];
     matches =
       byConditions.length > 0 || parts.length > 1
         ? byConditions

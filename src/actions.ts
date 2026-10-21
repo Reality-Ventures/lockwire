@@ -1,5 +1,5 @@
 import { existsSync, statSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { headCommit } from "./changed.js";
 import { type IndexState, type IndexStats, loadDocIndex } from "./docindex.js";
 import { computeWholeFileTiers, extractFileSymbols, fileExportsFingerprint } from "./extract.js";
@@ -30,9 +30,7 @@ import {
   outsideRepoMessage,
   resolveInsideRepo,
   stripBom,
-  toRepoRelative,
   walkFiles,
-  walkFilesWithin,
 } from "./repo.js";
 import type {
   Actor,
@@ -172,7 +170,7 @@ export function findRelocationCandidate(
       .replace(`class ${symbol.name} [`, `class ${oldName} [`);
     if (fingerprint(sig) === missingSigFp) candidates.push(path);
   }
-  return candidates.length === 1 ? candidates[0]! : null;
+  return candidates.length === 1 ? (candidates[0] ?? null) : null;
 }
 
 export interface LinkResult {
@@ -283,7 +281,7 @@ export async function linkDoc(
     // does that, and only updates the lockfile). Follow the anchor and fix the marker to match.
     let target = marker.target;
     let retargeted = false;
-    if ((!resolved || !resolved.found) && existing) {
+    if (!resolved?.found && existing) {
       const moved = existing.target;
       if (moved.path !== marker.target.path || moved.symbol !== marker.target.symbol) {
         try {
@@ -298,7 +296,7 @@ export async function linkDoc(
         }
       }
     }
-    if (!resolved || !resolved.found) {
+    if (!resolved?.found) {
       result.skipped.push({
         reason: resolved?.reason ? `target not found: ${resolved.reason}` : "target not found",
         target: targetLabel,
@@ -309,11 +307,10 @@ export async function linkDoc(
     // Re-stamping a drifted (or orphaned-then-reappeared) anchor accepts code nobody has looked at, so
     // it needs a human's say-so -- unless the code still matches and only the claim sentence moved.
     const codeDrifted =
-      existing !== undefined &&
-      existing.tiers.some(
+      existing?.tiers.some(
         (t) =>
           tierFingerprint(resolved.fingerprints, t) !== tierFingerprint(existing.fingerprints, t),
-      );
+      ) === true;
     if (
       (existing?.status === "drifted" || existing?.status === "orphaned") &&
       codeDrifted &&
@@ -429,7 +426,7 @@ export async function linkLockfileOnly(
   const tierProblem = inapplicableTiersReason(target, tiers);
   if (tierProblem) throw new Error(tierProblem);
   const resolved = await resolveTarget(repoRoot, target, config);
-  if (!resolved || !resolved.found)
+  if (!resolved?.found)
     throw new Error(`target not found: ${target.path}${target.symbol ? `#${target.symbol}` : ""}`);
   const lockfile = await readLockfile(repoRoot);
   const anchor: Anchor = {
@@ -894,8 +891,9 @@ export async function check(
       continue;
     }
 
+    const nowFingerprints = resolved.fingerprints;
     const moved = (t: Tier) =>
-      tierFingerprint(resolved!.fingerprints, t) !== tierFingerprint(anchor.fingerprints, t);
+      tierFingerprint(nowFingerprints, t) !== tierFingerprint(anchor.fingerprints, t);
     let driftedTiers = anchor.tiers.filter(moved);
     const anyTierChanged = ALL_TIERS.filter(moved);
 

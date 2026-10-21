@@ -27,7 +27,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 - `lockwire.lock` anchor store, with inline markdown markers (`<!-- lockwire <target> [tiers] [id] -->`) and lockfile-only bindings.
 - `.lockwire/ledger.jsonl` — an append-only, order-independent, tamper-evident event log with `git notes`-style union-merge semantics and [Agent Trace](https://agent-trace.dev/)-shaped actors.
 - CLI: `init`, `link`, `check` (text/JSON/GitHub-annotation output), `status`, `refs`, `history`, `ack`, `waive`, `unlink`, `ledger verify`.
-- Claude Code plugin: `PreToolUse`/`PostToolUse` hooks (fail-open, advisory by default), an MCP server (8 tools), and a skill.
+- Claude Code plugin: `PreToolUse`/`PostToolUse` hooks (fail-open, advisory by default), an MCP server (11 tools), and a skill.
 - Codex hook adapter, with a documented caveat on upstream `apply_patch`/`deny` enforcement gaps.
 - A same-file rename heuristic (`relocated` status) based on exact `sig`-fingerprint matching.
 - Time-boxed waivers with expiry, and a relink gate requiring `--reviewed` to re-stamp a currently-drifted anchor.

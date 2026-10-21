@@ -1,5 +1,5 @@
 import { existsSync, statSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { headCommit } from "./changed.js";
 import { loadDocIndex } from "./docindex.js";
 import { computeWholeFileTiers, extractFileSymbols, fileExportsFingerprint } from "./extract.js";
@@ -8,7 +8,7 @@ import { fingerprint, fingerprintSet } from "./hash.js";
 import { appendEvent, historyFor, readLedger } from "./ledger.js";
 import { anchorsForPath, lockfilePath, newAnchorId, readLockfile, removeAnchor, upsertAnchor, writeFileAtomic, writeLockfile, } from "./lockfile.js";
 import { claimUnchanged, retargetMarkerLine, scanMarkers, stampMarkerLine, } from "./markers.js";
-import { globToRegExp, isScannedDoc, matchesAny, outsideRepoMessage, resolveInsideRepo, stripBom, toRepoRelative, walkFiles, walkFilesWithin, } from "./repo.js";
+import { globToRegExp, isScannedDoc, matchesAny, outsideRepoMessage, resolveInsideRepo, stripBom, walkFiles, } from "./repo.js";
 import { ALL_TIERS, tierFingerprint } from "./types.js";
 import { checkClaimAgainstValue, dataFormatOf, resolveValue, valueFingerprintInput, wholeFileContent, } from "./values.js";
 /** Recomputes all four tier fingerprints for a target, or reports it unresolved (file/symbol not found). */
@@ -105,7 +105,7 @@ export function findRelocationCandidate(symbols, missingSigFp, oldName, taken = 
         if (fingerprint(sig) === missingSigFp)
             candidates.push(path);
     }
-    return candidates.length === 1 ? candidates[0] : null;
+    return candidates.length === 1 ? (candidates[0] ?? null) : null;
 }
 /** Tiers a marker binds when it doesn't say: `value` for a value in a data file, `sig` for a symbol, `path,body` for a file. */
 /** The tiers a target can actually produce: a tier it can't would be empty forever, so never drift. */
@@ -188,7 +188,7 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
         // does that, and only updates the lockfile). Follow the anchor and fix the marker to match.
         let target = marker.target;
         let retargeted = false;
-        if ((!resolved || !resolved.found) && existing) {
+        if (!resolved?.found && existing) {
             const moved = existing.target;
             if (moved.path !== marker.target.path || moved.symbol !== marker.target.symbol) {
                 try {
@@ -204,7 +204,7 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
                 }
             }
         }
-        if (!resolved || !resolved.found) {
+        if (!resolved?.found) {
             result.skipped.push({
                 reason: resolved?.reason ? `target not found: ${resolved.reason}` : "target not found",
                 target: targetLabel,
@@ -213,8 +213,7 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
         }
         // Re-stamping a drifted (or orphaned-then-reappeared) anchor accepts code nobody has looked at, so
         // it needs a human's say-so -- unless the code still matches and only the claim sentence moved.
-        const codeDrifted = existing !== undefined &&
-            existing.tiers.some((t) => tierFingerprint(resolved.fingerprints, t) !== tierFingerprint(existing.fingerprints, t));
+        const codeDrifted = existing?.tiers.some((t) => tierFingerprint(resolved.fingerprints, t) !== tierFingerprint(existing.fingerprints, t)) === true;
         if ((existing?.status === "drifted" || existing?.status === "orphaned") &&
             codeDrifted &&
             !opts.reviewed) {
@@ -321,7 +320,7 @@ export async function linkLockfileOnly(repoRoot, docPath, target, tiers, config,
     if (tierProblem)
         throw new Error(tierProblem);
     const resolved = await resolveTarget(repoRoot, target, config);
-    if (!resolved || !resolved.found)
+    if (!resolved?.found)
         throw new Error(`target not found: ${target.path}${target.symbol ? `#${target.symbol}` : ""}`);
     const lockfile = await readLockfile(repoRoot);
     const anchor = {
@@ -674,7 +673,8 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
             }
             continue;
         }
-        const moved = (t) => tierFingerprint(resolved.fingerprints, t) !== tierFingerprint(anchor.fingerprints, t);
+        const nowFingerprints = resolved.fingerprints;
+        const moved = (t) => tierFingerprint(nowFingerprints, t) !== tierFingerprint(anchor.fingerprints, t);
         let driftedTiers = anchor.tiers.filter(moved);
         const anyTierChanged = ALL_TIERS.filter(moved);
         // A value anchor can be checked for truth: does the sentence still state the value? If it does

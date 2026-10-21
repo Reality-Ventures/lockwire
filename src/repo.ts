@@ -173,7 +173,7 @@ function compileGlob(glob: string): RegExp {
       out += "[^/]*";
     } else if (c === "?") {
       out += "[^/]";
-    } else if (c && ".+^${}()|[]\\".includes(c)) {
+    } else if (c && /[.+^${}()|[\]\\]/.test(c)) {
       out += `\\${c}`;
     } else {
       out += c;
