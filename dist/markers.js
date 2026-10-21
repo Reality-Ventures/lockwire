@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import { fingerprint } from "./hash.js";
 import { ALL_TIERS } from "./types.js";
 const MARKER_RE = /^<!--\s*lockwire\s+(.+?)\s*-->\s*$/;
@@ -47,9 +48,11 @@ export function scanMarkers(text) {
                 tiers = tok.split(",");
             }
         }
-        const [path, symbol] = targetToken.split("#");
-        if (!path)
+        const [rawPath, symbol] = targetToken.split("#");
+        if (!rawPath)
             continue;
+        // `./src/a.ts` and `src/./a.ts` are claims about src/a.ts: normalise the way the hooks compare.
+        const path = posix.normalize(rawPath.replace(/\\/g, "/")).replace(/^(?:\.\/)+/, "");
         const { claimLine, text: claimText } = captureFollowingBlock(lines, i + 1);
         if (claimLine === -1)
             continue;

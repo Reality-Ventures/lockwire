@@ -33,6 +33,17 @@ export interface LinkResult {
         target: string;
     }[];
 }
+/** Tiers a marker binds when it doesn't say: `value` for a value in a data file, `sig` for a symbol, `path,body` for a file. */
+/** The tiers a target can actually produce: a tier it can't would be empty forever, so never drift. */
+export declare function applicableTiers(target: {
+    path: string;
+    symbol?: string;
+}): Tier[];
+/** Why `tiers` can't be bound to `target`, or null when they all can. */
+export declare function inapplicableTiersReason(target: {
+    path: string;
+    symbol?: string;
+}, tiers: readonly Tier[]): string | null;
 /** Scans a markdown doc for `<!-- lockwire ... -->` markers and creates/refreshes their anchors. */
 export declare function linkDoc(repoRoot: string, docPath: string, config: LockwireConfig, actor: Actor, opts?: {
     reviewed?: boolean;

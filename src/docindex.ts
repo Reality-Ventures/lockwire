@@ -31,6 +31,8 @@ const INDEX_VERSION = 1;
 export const RACY_MS = 2000;
 /** Rebuild from scratch at least this often, in case a filesystem didn't keep its mtimes honest. */
 export const MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/** The recorded mtime of a directory that couldn't be listed: no stat returns it, so it is always retried. */
+const UNREADABLE = -1;
 
 export const indexPath = (repoRoot: string) =>
   join(repoRoot, ".lockwire", "cache", "doc-index.json");
@@ -191,7 +193,7 @@ export async function loadDocIndex(
   if (data && (data.configKey !== configKey || now() - data.builtAt > MAX_AGE_MS)) data = null;
   // An index without its root directory record is incomplete (a build whose root listing failed):
   // nothing below it would ever be rediscovered, so start over.
-  if (data && !("" in data.dirs)) data = null;
+  if (data && !Object.hasOwn(data.dirs, "")) data = null;
   let sanitized = false;
   if (data) {
     // Drop entries the tree walk could never have produced: paths that escape the repo, and docs or
@@ -277,7 +279,10 @@ export async function loadDocIndex(
     const st = tryStat(abs(rel));
     if (!st?.isDirectory()) return;
     const listing = listDir(rel);
-    if (!listing) return;
+    if (!listing) {
+      markUnreadable(rel);
+      return;
+    }
     data.dirs[rel] = st.mtimeMs; // recorded from the stat taken before the listing
     changed = true;
     for (const doc of listing.docs) {
@@ -290,13 +295,39 @@ export async function loadDocIndex(
     for (const dir of listing.dirs) buildSubtree(dir);
   }
 
-  function dropSubtree(rel: string): void {
+  /**
+   * A directory that exists but can't be listed (EACCES): forget what was under it, but keep its record
+   * with an mtime no stat ever returns, so the next load tries it again. Dropping it would leave it
+   * undiscovered once its permissions come back, since its parent's mtime doesn't move.
+   */
+  function markUnreadable(rel: string): void {
     if (!data) return;
-    const prefix = rel === "" ? "" : `${rel}/`;
-    for (const d of Object.keys(data.dirs))
-      if (d === rel || d.startsWith(prefix)) delete data.dirs[d];
-    for (const d of Object.keys(data.docs)) if (d.startsWith(prefix)) delete data.docs[d];
+    if (Object.hasOwn(data.dirs, rel) && data.dirs[rel] === UNREADABLE) {
+      // Still unreadable: nothing new to record, and nothing below it was kept.
+      return;
+    }
+    dropSubtree(rel);
+    data.dirs[rel] = UNREADABLE;
     changed = true;
+  }
+
+  /** Forgets `rel` and everything recorded under it; returns whether anything was recorded. */
+  function dropSubtree(rel: string): boolean {
+    if (!data) return false;
+    const prefix = rel === "" ? "" : `${rel}/`;
+    let dropped = false;
+    for (const d of Object.keys(data.dirs))
+      if (d === rel || d.startsWith(prefix)) {
+        delete data.dirs[d];
+        dropped = true;
+      }
+    for (const d of Object.keys(data.docs))
+      if (d.startsWith(prefix)) {
+        delete data.docs[d];
+        dropped = true;
+      }
+    if (dropped) changed = true;
+    return dropped;
   }
 
   if (!data) {
@@ -314,7 +345,7 @@ export async function loadDocIndex(
     // 1. Which recorded directories moved? Parents first, so dropping one covers its children.
     const dirty: { rel: string; mtimeMs: number }[] = [];
     for (const rel of Object.keys(index.dirs).sort((a, b) => a.length - b.length)) {
-      if (!(rel in index.dirs)) continue; // already dropped with its parent
+      if (!Object.hasOwn(index.dirs, rel)) continue; // already dropped with its parent
       if (over()) {
         complete = false;
         break;
@@ -333,11 +364,11 @@ export async function loadDocIndex(
     // 2. Re-list those, reconciling added and removed entries.
     for (const { rel, mtimeMs } of dirty) {
       if (!complete) break;
-      if (!(rel in index.dirs)) continue;
+      if (!Object.hasOwn(index.dirs, rel)) continue;
       stats.dirsRescanned++;
       const listing = listDir(rel);
       if (!listing) {
-        dropSubtree(rel);
+        markUnreadable(rel);
         continue;
       }
       const wantDirs = new Set(listing.dirs);
@@ -349,8 +380,8 @@ export async function loadDocIndex(
           delete index.docs[d];
           changed = true;
         }
-      for (const dir of listing.dirs) if (!(dir in index.dirs)) buildSubtree(dir);
-      for (const doc of listing.docs) if (!(doc in index.docs)) readDoc(doc);
+      for (const dir of listing.dirs) if (!Object.hasOwn(index.dirs, dir)) buildSubtree(dir);
+      for (const doc of listing.docs) if (!Object.hasOwn(index.docs, doc)) readDoc(doc);
       if (index.dirs[rel] !== mtimeMs) {
         index.dirs[rel] = mtimeMs;
         changed = true;
@@ -359,8 +390,9 @@ export async function loadDocIndex(
 
     // 3. Which recorded docs were edited or removed?
     if (complete) {
+      const parentsChecked = new Set<string>();
       for (const rel of Object.keys(index.docs)) {
-        if (readThisRun.has(rel)) continue;
+        if (readThisRun.has(rel) || !Object.hasOwn(index.docs, rel)) continue;
         if (over()) {
           complete = false;
           break;
@@ -371,6 +403,14 @@ export async function loadDocIndex(
         if (!st?.isFile() || !entry) {
           delete index.docs[rel];
           changed = true;
+          // A doc that vanished without its directory changing may only be out of reach (a chmod
+          // doesn't move the directory's mtime). If the directory can't be listed, mark it so it's
+          // retried, or the doc would never be found again once it's readable.
+          const parent = parentOf(rel);
+          if (!parentsChecked.has(parent)) {
+            parentsChecked.add(parent);
+            if (tryStat(abs(parent))?.isDirectory() && !listDir(parent)) markUnreadable(parent);
+          }
           continue;
         }
         if (racy(st.mtimeMs)) sawRacy = true;

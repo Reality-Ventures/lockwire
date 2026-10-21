@@ -72,16 +72,22 @@ describe.skipIf(!existsSync(CLI))("the hooks leave a repo that never opted into 
   it.each([
     ["claude-post", claudeEdit],
     ["codex-post", codexEdit],
-  ] as const)("%s: editing code or a plain doc is silent and writes nothing", async (adapter, input) => {
+  ] as const)("%s: editing code, a plain doc, or a doc with a marker is silent and writes nothing", async (adapter, input) => {
     const { dir, status } = await plainRepo();
     const before = listing(dir);
-    for (const file of ["src/app.ts", "README.md"]) {
+    for (const file of ["src/app.ts", "README.md", "docs/d.md"]) {
       const r = run(dir, adapter, input(dir, file));
       expect(r.status).toBe(0);
       expect(r.stdout).toBe("");
     }
     expect(listing(dir)).toEqual(before);
     expect(status()).toBe("");
+  });
+
+  it("...while in an opted-in repo the same edit does report the unlinked marker", async () => {
+    const { dir } = await plainRepo({ "lockwire.lock": '{"version":1,"anchors":[]}' });
+    const r = run(dir, "claude-post", claudeEdit(dir, "docs/d.md"));
+    expect(r.stdout).toContain("has markers that no anchor backs");
   });
 
   it("an error in the hook doesn't leave a .lockwire/hook.log in a repo that hasn't opted in", async () => {

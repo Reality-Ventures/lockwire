@@ -98,6 +98,21 @@ export function findRelocationCandidate(symbols, missingSigFp, oldName, taken = 
     return candidates.length === 1 ? candidates[0] : null;
 }
 /** Tiers a marker binds when it doesn't say: `value` for a value in a data file, `sig` for a symbol, `path,body` for a file. */
+/** The tiers a target can actually produce: a tier it can't would be empty forever, so never drift. */
+export function applicableTiers(target) {
+    if (dataFormatOf(target.path))
+        return target.symbol ? ["value", "path"] : ["path", "body"];
+    return ["path", "sig", "body", "deps"];
+}
+/** Why `tiers` can't be bound to `target`, or null when they all can. */
+export function inapplicableTiersReason(target, tiers) {
+    const allowed = applicableTiers(target);
+    const bad = tiers.filter((t) => !allowed.includes(t));
+    if (bad.length === 0)
+        return null;
+    const label = `${target.path}${target.symbol ? `#${target.symbol}` : ""}`;
+    return `${bad.length === 1 ? "tier" : "tiers"} ${bad.join(", ")} can't apply to ${label}, which can bind ${allowed.join(", ")}`;
+}
 function defaultTiers(target, resolved) {
     if (resolved?.value || (target.symbol && dataFormatOf(target.path)))
         return ["value"];
@@ -191,6 +206,11 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
             continue;
         }
         const tiers = marker.tiers ?? defaultTiers(target, resolved);
+        const tierProblem = inapplicableTiersReason(target, tiers);
+        if (tierProblem) {
+            result.skipped.push({ reason: tierProblem, target: targetLabel });
+            continue;
+        }
         // Stamping a value anchor whose sentence states a different value would bind a false claim.
         if (tiers.includes("value") && resolved.value) {
             const verdict = checkClaimAgainstValue(marker.claimText, resolved.value.raw);
@@ -270,6 +290,9 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
 }
 /** `lockwire link <doc> <target>` — a lockfile-only anchor with no inline marker, for whole-doc-to-file bindings. */
 export async function linkLockfileOnly(repoRoot, docPath, target, tiers, config, actor) {
+    const tierProblem = inapplicableTiersReason(target, tiers);
+    if (tierProblem)
+        throw new Error(tierProblem);
     const resolved = await resolveTarget(repoRoot, target, config);
     if (!resolved || !resolved.found)
         throw new Error(`target not found: ${target.path}${target.symbol ? `#${target.symbol}` : ""}`);

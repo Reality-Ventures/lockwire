@@ -200,6 +200,7 @@ describe.skipIf(!existsSync(CLI))("through the CLI and hooks", () => {
   it("the PostToolUse hook tells an agent that its edit left an unlinked marker, and `link` fixes it", async () => {
     const dir = await repo({ "CLAUDE.md": doc(M()) });
     await mkdir(join(dir, ".git"));
+    cli(dir, ["init"]); // the hooks only act in a repo that has opted into lockwire
     const payload = (file: string) =>
       JSON.stringify({ tool_name: "Edit", tool_input: { file_path: join(dir, file) }, cwd: dir });
     const post = cli(dir, ["hook", "claude-post"], payload("CLAUDE.md"));

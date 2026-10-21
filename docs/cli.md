@@ -34,7 +34,7 @@ lockwire link
 lockwire link --reviewed
 ```
 
-A marker's target can also be a **value in a data file**: a key in a JSON file (`results/metrics.json#ci.canon.cve.lo`, `runs[0].score`, or a JSON Pointer `#/a.b/c` for keys with dots) or a macro in a LaTeX file (`paper/numbers.tex#ciCanonCVELo`). Such a marker binds the `value` tier by default, and `link` refuses to stamp one whose sentence already states a different value — see [concepts.md](concepts.md#numbers-and-other-values).
+A marker's target can also be a **value in a data file**: a key in a JSON file (`results/metrics.json#ci.canon.cve.lo`, `runs[0].score`, or a JSON Pointer `#/a.b/c` for keys with dots) or a macro in a LaTeX file (`paper/numbers.tex#ciCanonCVELo`). Such a marker binds the `value` tier by default, and `link` refuses to stamp one whose sentence already states a different value. `link` also refuses a tier the target can't produce, which would be empty forever and so never drift: a value in a data file can bind `value` and `path`, a whole data file `path` and `body`, and code `path`, `sig`, `body` and `deps` ("tier value can't apply to src/a.ts#alpha, which can bind path, sig, body, deps"). A marker's target is normalised, so `./src/a.ts` is `src/a.ts` — see [concepts.md](concepts.md#numbers-and-other-values).
 
 ### `lockwire link <doc.md> <target> [--tiers a,b]`
 

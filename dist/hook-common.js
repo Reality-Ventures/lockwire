@@ -105,6 +105,9 @@ export function hookActor(tool, input) {
     };
 }
 export async function reportDriftFor(repoRoot, touchedPath, actor) {
+    // Inert in a repository that never opted into lockwire, like the PreToolUse hooks.
+    if (!isLockwireRepo(repoRoot))
+        return { text: "", anyDrift: false };
     const config = await readConfig(repoRoot);
     const result = await check(repoRoot, config, [touchedPath], actor ? { actor } : {});
     const relevant = result.results.filter((r) => (r.anchor.target.path === touchedPath || r.anchor.doc === touchedPath) &&

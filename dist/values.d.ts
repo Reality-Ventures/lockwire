@@ -14,14 +14,25 @@ export declare function valueFingerprintInput(value: unknown): string;
 export declare function wholeFileContent(text: string, format: DataFormat): string;
 export declare function displayValue(value: unknown): string;
 export interface ClaimNumber {
-    /** As written: `0.18`, `18%`, `1,024`. */
+    /** As written, sign and unit included: `0.18`, `18%`, `1,024`, `12.5ms`, `1.2B`, `−0.5`. */
     text: string;
+    /** The quantity stated: `1.2B` is 1.2e9. */
     value: number;
-    /** Digits after the decimal point, i.e. the precision the sentence commits to. */
+    /**
+     * Digits after the decimal point of the literal, i.e. the precision the sentence commits to, in
+     * units of `scale`. Negative for scientific notation (`1.5e3` commits to the hundreds).
+     */
     decimals: number;
+    /** The magnitude a suffix applies (`k` 1e3, `M` 1e6, `B`/`bn` 1e9, `T` 1e12, or the words). */
+    scale: number;
     percent: boolean;
 }
-/** Numbers a sentence states, skipping digits that are part of a word or identifier (`v2`, `x86`, `h264`). */
+/**
+ * Numbers a sentence states. Skips digits that are part of a word or identifier (`v2`, `x86`, `h264`,
+ * `0.18_lo`, `0x1F`), version strings (`1.2.3`) and ordinals (`2nd`). A unit glued to a number doesn't
+ * hide it (`12.5ms` states 12.5), and a magnitude suffix scales it (`1.2B`, `3.5k`, `2 million`). A
+ * hyphen between two numbers is a range, not a minus (`0.18-0.24`, LaTeX's `15--29`).
+ */
 export declare function claimNumbers(text: string): ClaimNumber[];
 export interface ClaimCheck {
     /** False when the sentence states nothing that can be compared with this value. */
@@ -32,8 +43,10 @@ export interface ClaimCheck {
 }
 /**
  * Does the claim state this value? A number value matches if any number in the sentence equals it at
- * the sentence's own precision (a percentage also matches the value × 100). A string value matches
- * if the sentence contains it. Other values (objects, booleans, null) aren't checked against prose.
+ * the sentence's own precision (a percentage also matches the value × 100). A string value that
+ * contains numbers (`21\%; 95\% CI 15--29\%`) matches if every one of them is stated in the sentence;
+ * one with no numbers matches if the sentence contains it. Other values (objects, booleans, null)
+ * aren't checked against prose.
  */
 export declare function checkClaimAgainstValue(claimText: string, value: unknown): ClaimCheck;
 //# sourceMappingURL=values.d.ts.map

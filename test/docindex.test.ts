@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -544,5 +545,69 @@ describe("the cache stays out of git", () => {
     await loadDocIndex(root, DEFAULT_CONFIG, { now: () => BASE });
     const lines = (await readFile(join(root, ".lockwire", ".gitignore"), "utf8")).split("\n").filter(Boolean);
     expect(lines).toEqual(["hook.log", "my-local-notes.txt", "cache/"]);
+  });
+});
+
+describe("doc index: names and permissions", () => {
+  it("a directory named like an Object.prototype member (constructor, toString) is indexed", async () => {
+    const root = await tree();
+    put(root, "README.md", docText(1));
+    settleTree(root);
+    await loadDocIndex(root, DEFAULT_CONFIG, { now: () => BASE });
+    put(root, "constructor/guide.md", docText(2));
+    put(root, "toString/x.md", docText(3));
+    put(root, "__proto__/y.md", docText(4));
+    const idx = await loadDocIndex(root, DEFAULT_CONFIG, { now: () => BASE + 60_000 });
+    expect(asMap(idx)).toEqual(fullScan(root));
+    expect(idx.docs).toContain("constructor/guide.md");
+  });
+
+  const canChmod = process.platform !== "win32" && process.getuid?.() !== 0;
+
+  it.skipIf(!canChmod)("a directory that was briefly unreadable is found again once readable (chmod moves no mtime)", async () => {
+    const root = await tree();
+    put(root, "docs/a.md", docText(1));
+    put(root, "docs/b.md", docText(2));
+    settleTree(root);
+    expect((await loadDocIndex(root, DEFAULT_CONFIG, { now: () => BASE })).docs).toEqual(["docs/a.md", "docs/b.md"]);
+    chmodSync(join(root, "docs"), 0o000);
+    try {
+      expect((await loadDocIndex(root, DEFAULT_CONFIG, { now: () => BASE + 60_000 })).docs).toEqual([]);
+    } finally {
+      chmodSync(join(root, "docs"), 0o755);
+    }
+    const after = await loadDocIndex(root, DEFAULT_CONFIG, { now: () => BASE + 120_000 });
+    expect(asMap(after)).toEqual(fullScan(root));
+  });
+
+  it.skipIf(!canChmod)("one that is unreadable from the start is retried, and found when it opens up", async () => {
+    const root = await tree();
+    put(root, "README.md", docText(1));
+    put(root, "locked/a.md", docText(2));
+    settleTree(root);
+    chmodSync(join(root, "locked"), 0o000);
+    try {
+      expect((await loadDocIndex(root, DEFAULT_CONFIG, { now: () => BASE })).docs).toEqual(["README.md"]);
+    } finally {
+      chmodSync(join(root, "locked"), 0o755);
+    }
+    expect((await loadDocIndex(root, DEFAULT_CONFIG, { now: () => BASE + 60_000 })).docs).toEqual(["README.md", "locked/a.md"]);
+  });
+
+  it.skipIf(!canChmod)("a directory that stays unreadable doesn't make every load rewrite the index", async () => {
+    const root = await tree();
+    put(root, "README.md", docText(1));
+    put(root, "locked/a.md", docText(2));
+    settleTree(root);
+    chmodSync(join(root, "locked"), 0o000);
+    try {
+      await loadDocIndex(root, DEFAULT_CONFIG, { now: () => BASE });
+      const second = await loadDocIndex(root, DEFAULT_CONFIG, { now: () => BASE + 60_000 });
+      const third = await loadDocIndex(root, DEFAULT_CONFIG, { now: () => BASE + 120_000 });
+      expect(second.stats.wrote).toBe(false);
+      expect(third.stats).toMatchObject({ docsRead: 0, wrote: false });
+    } finally {
+      chmodSync(join(root, "locked"), 0o755);
+    }
   });
 });

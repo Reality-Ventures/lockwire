@@ -65,7 +65,7 @@ Start with `advisory`. A tool that blocks on day one gets uninstalled on day one
 
 ### Inert where lockwire isn't used
 
-The hooks run in every repo you edit, so they only do anything in a repo that has opted in: it has a `lockwire.lock` or a `.lockwire/config.json`. Anywhere else the `PreToolUse` hooks don't scan the docs, build an index or log errors, and create no files — no `.lockwire/` directory, nothing in `git status`.
+The hooks run in every repo you edit, so they only do anything in a repo that has opted in: it has a `lockwire.lock` or a `.lockwire/config.json`. Anywhere else the hooks — `PreToolUse` and `PostToolUse`, Claude Code and Codex — print nothing, don't scan the docs, build an index or log errors, and create no files: no `.lockwire/` directory, nothing in `git status`.
 
 ### Fail-open, by contract
 

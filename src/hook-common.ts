@@ -155,6 +155,8 @@ export async function reportDriftFor(
   touchedPath: string,
   actor?: Actor,
 ): Promise<{ text: string; anyDrift: boolean }> {
+  // Inert in a repository that never opted into lockwire, like the PreToolUse hooks.
+  if (!isLockwireRepo(repoRoot)) return { text: "", anyDrift: false };
   const config = await readConfig(repoRoot);
   const result = await check(repoRoot, config, [touchedPath], actor ? { actor } : {});
   const relevant = result.results.filter(
