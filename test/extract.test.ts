@@ -145,7 +145,7 @@ export function outer(): void {
       "typescript",
     );
     expect(Object.keys(out).sort()).toEqual(["helper", "outer"]);
-    expect(out.helper).toBe("fn helper(a:T)->number [export]");
+    expect(out.helper).toBe("fn helper(a:number)->number [export]");
   });
 
   it("...and likewise in Python", async () => {
@@ -231,7 +231,7 @@ class C:
       "python",
     );
     expect([...s.bySymbolPath.keys()].sort()).toEqual(["C", "C.p", "C.s", "view"]);
-    expect(s.bySymbolPath.get("view")?.sigTokens).toBe("fn view(a,b=) [@app.route('/x')]");
+    expect(s.bySymbolPath.get("view")?.sigTokens).toBe("fn view(a,b=1) [@app.route('/x')]");
   });
 
   it("Python has no `export`, so decorating a function doesn't make it one", async () => {

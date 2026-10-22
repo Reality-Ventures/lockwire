@@ -2,8 +2,13 @@ import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { headCommit } from "./changed.js";
 import { type IndexState, type IndexStats, loadDocIndex } from "./docindex.js";
-import { computeWholeFileTiers, extractFileSymbols, fileExportsFingerprint } from "./extract.js";
-import { langForPath, parserFor } from "./grammar.js";
+import {
+  computeWholeFileTiers,
+  extractFileSymbols,
+  FINGERPRINT_VERSION,
+  fileExportsFingerprint,
+} from "./extract.js";
+import { type LangId, langForPath, parserFor } from "./grammar.js";
 import { fingerprint, fingerprintSet } from "./hash.js";
 import { appendEvent, historyFor, readLedger } from "./ledger.js";
 import {
@@ -61,16 +66,24 @@ export interface TargetResolution {
   reason?: string;
 }
 
-/** Recomputes all four tier fingerprints for a target, or reports it unresolved (file/symbol not found). */
+/** The fingerprint version an anchor was stamped with (anchors from before versions are version 1). */
+export const versionOf = (anchor: Pick<Anchor, "fingerprintVersion">) =>
+  anchor.fingerprintVersion ?? 1;
+
+/**
+ * Recomputes all four tier fingerprints for a target, or reports it unresolved (file/symbol not found).
+ * `version` is how to compute them: the current way to stamp, an anchor's own to compare with it.
+ */
 export async function resolveTarget(
   repoRoot: string,
   target: { path: string; symbol?: string },
   config: LockwireConfig,
+  version: number = FINGERPRINT_VERSION,
 ): Promise<TargetResolution | null> {
   const absPath = resolveInsideRepo(repoRoot, target.path);
   if (!absPath) throw new Error(outsideRepoMessage(target.path));
   if (!existsSync(absPath)) return null;
-  return resolveTargetInText(target, await readFile(absPath, "utf8"), config);
+  return resolveTargetInText(target, await readFile(absPath, "utf8"), config, version);
 }
 
 /**
@@ -81,6 +94,7 @@ export async function resolveTargetInText(
   target: { path: string; symbol?: string },
   content: string,
   config: LockwireConfig,
+  version: number = FINGERPRINT_VERSION,
 ): Promise<TargetResolution & { source?: string }> {
   // A data file (JSON, LaTeX macros): the target is a value in it, not a symbol.
   const dataFormat = dataFormatOf(target.path);
@@ -111,11 +125,8 @@ export async function resolveTargetInText(
       `lockwire supports TypeScript, TSX, JavaScript, and Python source, and values in JSON, CSV, TSV and LaTeX (.tex) files — "${target.path}" is none of these`,
     );
 
-  const parser = await parserFor(lang);
-  const tree = parser.parse(content);
-  if (!tree) throw new Error(`failed to parse ${target.path}`);
-  const root = tree.rootNode;
-  const symbols = extractFileSymbols(root, lang, config.normalizeLocals);
+  const parsed = await parseSource(target.path, content, lang, config, version);
+  const { symbols } = parsed;
   const pathFp = fingerprint(target.path);
 
   if (target.symbol) {
@@ -135,18 +146,67 @@ export async function resolveTargetInText(
     };
   }
 
-  const whole = computeWholeFileTiers(root, lang, config.normalizeLocals);
   return {
     found: true,
     fingerprints: {
       path: pathFp,
       sig: fileExportsFingerprint(symbols),
-      body: fingerprint(whole.bodyNormalized),
-      deps: fingerprintSet(whole.deps),
+      body: fingerprint(parsed.whole.bodyNormalized),
+      deps: fingerprintSet(parsed.whole.deps),
     },
     symbols,
     source: content,
   };
+}
+
+interface ParsedSource {
+  content: string;
+  symbols: FileSymbols;
+  whole: { bodyNormalized: string; deps: string[] };
+}
+
+/**
+ * The last parse of each file, reused while its content is the same: a check with many anchors on one
+ * file parses it once, not once per anchor. Keyed on the content itself rather than mtime, so an edit
+ * within the same millisecond can't be served stale.
+ */
+const parseCache = new Map<string, ParsedSource>();
+const PARSE_CACHE_SIZE = 32;
+
+async function parseSource(
+  path: string,
+  content: string,
+  lang: LangId,
+  config: LockwireConfig,
+  version: number,
+): Promise<ParsedSource> {
+  const key = `${version}|${config.normalizeLocals}|${lang}|${path}`;
+  const hit = parseCache.get(key);
+  if (hit && hit.content === content) {
+    parseCache.delete(key); // most recently used last
+    parseCache.set(key, hit);
+    return hit;
+  }
+  const tree = (await parserFor(lang)).parse(content);
+  if (!tree) throw new Error(`failed to parse ${path}`);
+  // Everything kept is read out as strings, so the tree (wasm memory) is freed straight away.
+  let parsed: ParsedSource;
+  try {
+    parsed = {
+      content,
+      symbols: extractFileSymbols(tree.rootNode, lang, config.normalizeLocals, version),
+      whole: computeWholeFileTiers(tree.rootNode, lang, config.normalizeLocals, version),
+    };
+  } finally {
+    tree.delete();
+  }
+  parseCache.delete(key);
+  parseCache.set(key, parsed);
+  if (parseCache.size > PARSE_CACHE_SIZE) {
+    const oldest = parseCache.keys().next().value;
+    if (oldest !== undefined) parseCache.delete(oldest);
+  }
+  return parsed;
 }
 
 /**
@@ -162,14 +222,29 @@ export function findRelocationCandidate(
   missingSigFp: string,
   oldName: string,
   taken: ReadonlySet<string> = new Set(),
+  /**
+   * The vanished symbol's stamped body and deps. When given, a candidate must also match one of them:
+   * a rename keeps the implementation, while a deleted function's look-alike neighbour (same
+   * parameters, different code) is not where its claim went.
+   */
+  stamped?: Pick<Fingerprints, "body" | "deps">,
 ): string | null {
   const candidates: string[] = [];
   for (const [path, symbol] of symbols.bySymbolPath) {
     if (taken.has(path)) continue;
-    const sig = symbol.sigTokens
-      .replace(`fn ${symbol.name}(`, `fn ${oldName}(`)
-      .replace(`class ${symbol.name} [`, `class ${oldName} [`);
-    if (fingerprint(sig) === missingSigFp) candidates.push(path);
+    const sig =
+      symbol.sigFor?.(oldName) ??
+      symbol.sigTokens
+        .replace(`fn ${symbol.name}(`, `fn ${oldName}(`)
+        .replace(`class ${symbol.name} [`, `class ${oldName} [`);
+    if (fingerprint(sig) !== missingSigFp) continue;
+    if (
+      stamped &&
+      fingerprint(symbol.bodyNormalized) !== stamped.body &&
+      fingerprintSet(symbol.deps) !== stamped.deps
+    )
+      continue;
+    candidates.push(path);
   }
   return candidates.length === 1 ? (candidates[0] ?? null) : null;
 }
@@ -309,12 +384,20 @@ export async function linkDoc(
       continue;
     }
 
+    // Compare with the anchor as it was computed: an anchor stamped by an older fingerprint version is
+    // compared under that version, so upgrading lockwire never reads as changed code.
+    const compared =
+      existing && versionOf(existing) !== FINGERPRINT_VERSION
+        ? await resolveTarget(repoRoot, target, config, versionOf(existing)).catch(() => null)
+        : resolved;
+    const then = compared?.found ? compared : resolved;
+
     // Re-stamping an anchor whose bound code moved since it was stamped accepts code nobody has looked
     // at, so it needs a human's say-so -- whether or not a `check` has recorded the drift yet. A moved
     // value the sentence already states is the fix itself, not unreviewed code.
     const codeDrifted =
       existing?.tiers.some((t) => {
-        if (tierFingerprint(resolved.fingerprints, t) === tierFingerprint(existing.fingerprints, t))
+        if (tierFingerprint(then.fingerprints, t) === tierFingerprint(existing.fingerprints, t))
           return false;
         if (t !== "value" || !resolved.value) return true;
         const verdict = checkClaimAgainstValue(marker.claimText, resolved.value.raw);
@@ -357,6 +440,7 @@ export async function linkDoc(
       !isNew &&
       !retargeted &&
       existing.status === "fresh" &&
+      versionOf(existing) === FINGERPRINT_VERSION &&
       existing.doc === docPath &&
       existing.claim?.hash === marker.claimHash &&
       existing.claim?.line === marker.claimLine &&
@@ -382,6 +466,7 @@ export async function linkDoc(
       target,
       tiers,
       fingerprints: resolved.fingerprints,
+      fingerprintVersion: FINGERPRINT_VERSION,
       linked: { at: new Date().toISOString(), commit, by: actor },
       status: "fresh",
       waiver: null,
@@ -461,6 +546,7 @@ export async function linkLockfileOnly(
     target,
     tiers,
     fingerprints: resolved.fingerprints,
+    fingerprintVersion: FINGERPRINT_VERSION,
     linked: { at: new Date().toISOString(), commit: null, by: actor },
     status: "fresh",
     waiver: null,
@@ -802,7 +888,7 @@ export async function check(
     let resolved: TargetResolution | null;
     let unresolvedNote = "file not found";
     try {
-      resolved = await resolveTarget(repoRoot, anchor.target, config);
+      resolved = await resolveTarget(repoRoot, anchor.target, config, versionOf(anchor));
     } catch (err) {
       resolved = null;
       unresolvedNote = err instanceof Error ? err.message : String(err);
@@ -841,6 +927,7 @@ export async function check(
                 .filter((a) => a.id !== anchor.id && a.target.path === anchor.target.path)
                 .flatMap((a) => (a.target.symbol ? [a.target.symbol] : [])),
             ),
+            anchor.fingerprints,
           )
         : null;
       if (relocatedTo) {
@@ -848,6 +935,7 @@ export async function check(
           repoRoot,
           { path: anchor.target.path, symbol: relocatedTo },
           config,
+          versionOf(anchor),
         );
         const target = { path: anchor.target.path, symbol: relocatedTo };
         // A rename must not launder other changes: `sig` is expected to differ (it carries the
@@ -1005,6 +1093,21 @@ export async function check(
         singleHashWouldFlag: anyTierChanged.length > 0,
       });
     } else {
+      // Stamped by an older fingerprint version and nothing has moved since: re-stamp it the current way
+      // so later checks see what the current version sees (types in `sig`, every overload, ...). Nothing
+      // about the claim changed, so this records no event. If the target doesn't resolve the current way
+      // (a version-1 path a newer version spells differently), it keeps its old fingerprints.
+      if (versionOf(anchor) !== FINGERPRINT_VERSION && anyTierChanged.length === 0) {
+        const upgraded = await resolveTarget(repoRoot, anchor.target, config).catch(() => null);
+        if (upgraded?.found) {
+          anchor = {
+            ...anchor,
+            fingerprints: upgraded.fingerprints,
+            fingerprintVersion: FINGERPRINT_VERSION,
+          };
+          current = upsertAnchor(current, anchor);
+        }
+      }
       if (anchor.status === "drifted" && unchangedForThisClaim) {
         const resolvedAnchor: Anchor = { ...anchor, status: "fresh" };
         current = upsertAnchor(current, resolvedAnchor);
@@ -1128,6 +1231,7 @@ export async function ack(
       ...anchor,
       status: "fresh",
       fingerprints: resolved.fingerprints,
+      fingerprintVersion: FINGERPRINT_VERSION,
       claim,
       ...(resolved.value ? { value: resolved.value.display } : {}),
     };

@@ -54,6 +54,11 @@ export interface Anchor {
     waiver: Waiver | null;
     /** For a value anchor: the value as it was when stamped (`0.18`), so drift can say what it moved from. */
     value?: string;
+    /**
+     * How `fingerprints` were computed (see `FINGERPRINT_VERSION` in extract.ts). Absent on anchors
+     * stamped before versions existed, which are version 1.
+     */
+    fingerprintVersion?: number;
 }
 export interface Lockfile {
     version: 1;
@@ -98,6 +103,8 @@ export interface ResolvedSymbol {
     sourceText: string;
     bodyNormalized: string;
     deps: string[];
+    /** The signature as it would read under another name, for same-file rename detection. */
+    sigFor?: (name: string) => string;
 }
 export interface FileSymbols {
     /** dotted-path name -> symbol, e.g. "createSession" or "AuthConfig.refresh" */

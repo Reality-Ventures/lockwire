@@ -19,9 +19,9 @@
       ],
       "fingerprints": {
         "path": "b3:fc7d17e0961f3989a5fa526b90f07cdd",
-        "sig": "b3:cddd2e7219f3a965925a3f168e1f44b5",
-        "body": "b3:67b6bc1f059e2f72d26e3b2a5147ce8d",
-        "deps": "b3:b59cd5ae65ec1d0ffc35e35b826f8d9a"
+        "sig": "b3:10465d8d1b6b2f0ab192734c1d5b1ad3",
+        "body": "b3:40a49b89c0f5a35d81d0d4e9ac85ba64",
+        "deps": "b3:bf3398bfb103a2b3a28f6406be92c438"
       },
       "linked": {
         "at": "2026-09-25T15:49:12.643Z",
@@ -34,7 +34,8 @@
         }
       },
       "status": "fresh",
-      "waiver": null
+      "waiver": null,
+      "fingerprintVersion": 2
     },
     {
       "id": "g849y7xt",
@@ -54,8 +55,8 @@
       ],
       "fingerprints": {
         "path": "b3:58a6218c217af2d48e135f75150974de",
-        "sig": "b3:5e0defe55ca129019b0d58af4ca75998",
-        "body": "b3:fd7aaabc2d76a53f66bca3d73288a2da",
+        "sig": "b3:8677bac55d307564ea160e886713ca6d",
+        "body": "b3:d3bf9acf88bdb94974d3b40cb3b9b882",
         "deps": "b3:d213dba979da0fdb35bc946549ed3b17"
       },
       "linked": {
@@ -69,7 +70,8 @@
         }
       },
       "status": "fresh",
-      "waiver": null
+      "waiver": null,
+      "fingerprintVersion": 2
     }
   ]
 }

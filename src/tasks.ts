@@ -12,7 +12,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import type { AnchorCheckResult, UnlinkedMarker } from "./actions.js";
-import { ack, check, linkDoc, markerReader, resolveTargetInText } from "./actions.js";
+import { ack, check, linkDoc, markerReader, resolveTargetInText, versionOf } from "./actions.js";
 import { commitsTouching, fileAtCommit } from "./changed.js";
 import { describeDrift } from "./format.js";
 import { fingerprint } from "./hash.js";
@@ -305,7 +305,7 @@ async function snapshotStamped(
     const text = fileAtCommit(repoRoot, commit, anchor.target.path);
     if (text === null) return null;
     try {
-      const then = await resolveTargetInText(anchor.target, text, config);
+      const then = await resolveTargetInText(anchor.target, text, config, versionOf(anchor));
       if (!then.found) return null;
       const matching = anchor.tiers.filter(
         (t) => tierFingerprint(then.fingerprints, t) === tierFingerprint(anchor.fingerprints, t),

@@ -19,7 +19,7 @@ export function langForPath(path: string): LangId | null {
   if (path.endsWith(".ts") || path.endsWith(".mts") || path.endsWith(".cts")) return "typescript";
   if (path.endsWith(".jsx")) return "javascript";
   if (path.endsWith(".js") || path.endsWith(".mjs") || path.endsWith(".cjs")) return "javascript";
-  if (path.endsWith(".py")) return "python";
+  if (path.endsWith(".py") || path.endsWith(".pyi")) return "python";
   return null;
 }
 
@@ -38,9 +38,15 @@ export async function loadLanguage(lang: LangId): Promise<Language> {
   return loaded;
 }
 
+const parsers = new Map<LangId, Parser>();
+
+/** One parser per language, reused: a new one per file is wasm memory that's never given back. */
 export async function parserFor(lang: LangId): Promise<Parser> {
+  const cached = parsers.get(lang);
+  if (cached) return cached;
   const language = await loadLanguage(lang);
   const parser = new Parser();
   parser.setLanguage(language);
+  parsers.set(lang, parser);
   return parser;
 }

@@ -171,3 +171,36 @@ describe.skipIf(!existsSync(CLI))("CLI messages and exit codes", () => {
     expect(cli(dir, ["ledger", "verify"]).stdout).toContain("bad line(s): 1");
   });
 });
+
+describe("relocation after a symbol disappears", () => {
+  const relocate = async (before: string, after: string, path = "a.ts", symbol = "parseId") => {
+    const dir = await repo({ [path]: before, "A.md": `<!-- lockwire ${path}#${symbol} -->\nIt parses.\n` });
+    await linkDoc(dir, "A.md", DEFAULT_CONFIG, actor);
+    await writeFile(join(dir, path), after, "utf8");
+    return (await check(dir, DEFAULT_CONFIG)).summary;
+  };
+
+  it("a deleted function's look-alike neighbour doesn't inherit its claim", async () => {
+    const hash = "export function hashName(s: string): number {\n  return s.length * 31;\n}\n";
+    const parse = "export function parseId(s: string): number {\n  return Number(s);\n}\n";
+    expect(await relocate(parse + hash, hash)).toMatchObject({ relocated: 0, orphaned: 1 });
+    const py = "def checksum(text: bytes) -> int:\n    return sum(text)\n";
+    expect(
+      await relocate(
+        `def parse_int(text: bytes) -> int:\n    return int(text)\n\n${py}`,
+        py,
+        "a.py",
+        "parse_int",
+      ),
+    ).toMatchObject({ relocated: 0, orphaned: 1 });
+  });
+
+  it("a real rename (same implementation) is still followed", async () => {
+    expect(
+      await relocate(
+        "export function parseId(s: string): number {\n  return Number(s);\n}\n",
+        "export function parseIdentifier(s: string): number {\n  return Number(s);\n}\n",
+      ),
+    ).toMatchObject({ relocated: 1, orphaned: 0 });
+  });
+});

@@ -1,4 +1,11 @@
+import { computeWholeFileTiersV2, extractFileSymbolsV2 } from "./extract-v2.js";
 import { fingerprintSet } from "./hash.js";
+/**
+ * How fingerprints are computed. Anchors record the version they were stamped with, and `check`
+ * compares each one under its own version, so changing the extractor never makes an existing anchor
+ * look drifted. Version 1 is this file; version 2 is extract-v2.ts.
+ */
+export const FINGERPRINT_VERSION = 2;
 const IDENTIFIER_TYPES = new Set([
     "identifier",
     "property_identifier",
@@ -284,7 +291,9 @@ function collectDeps(subtree, lang, importedNames) {
  * each class, into a dotted symbol path ("createSession", "AuthConfig.refresh") with its
  * four tier fingerprints precomputed as raw material (sig string, normalized body, deps set).
  */
-export function extractFileSymbols(root, lang, normalizeLocals) {
+export function extractFileSymbols(root, lang, normalizeLocals, version = FINGERPRINT_VERSION) {
+    if (version >= 2)
+        return extractFileSymbolsV2(root, lang, normalizeLocals);
     const decl = DECLARATION_TYPES[lang];
     const importedNames = collectImportedNames(root, lang);
     const bySymbolPath = new Map();
@@ -402,7 +411,9 @@ export function fileExportsFingerprint(symbols) {
     return fingerprintSet(symbols.fileExports.map((path) => `${path}:${symbols.bySymbolPath.get(path)?.sigTokens ?? ""}`));
 }
 /** Whole-file tiers for a file-only anchor (no `#Symbol`): same normalization pipeline, applied to the root node. */
-export function computeWholeFileTiers(root, lang, normalizeLocals) {
+export function computeWholeFileTiers(root, lang, normalizeLocals, version = FINGERPRINT_VERSION) {
+    if (version >= 2)
+        return computeWholeFileTiersV2(root, lang, normalizeLocals);
     const importedNames = collectImportedNames(root, lang);
     const locals = collectLocalDeclared(root, [], lang);
     return {

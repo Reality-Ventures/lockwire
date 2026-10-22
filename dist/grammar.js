@@ -18,7 +18,7 @@ export function langForPath(path) {
         return "javascript";
     if (path.endsWith(".js") || path.endsWith(".mjs") || path.endsWith(".cjs"))
         return "javascript";
-    if (path.endsWith(".py"))
+    if (path.endsWith(".py") || path.endsWith(".pyi"))
         return "python";
     return null;
 }
@@ -36,10 +36,16 @@ export async function loadLanguage(lang) {
     cache.set(lang, loaded);
     return loaded;
 }
+const parsers = new Map();
+/** One parser per language, reused: a new one per file is wasm memory that's never given back. */
 export async function parserFor(lang) {
+    const cached = parsers.get(lang);
+    if (cached)
+        return cached;
     const language = await loadLanguage(lang);
     const parser = new Parser();
     parser.setLanguage(language);
+    parsers.set(lang, parser);
     return parser;
 }
 //# sourceMappingURL=grammar.js.map

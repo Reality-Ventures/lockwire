@@ -13,11 +13,16 @@ export interface TargetResolution {
     /** When not found and there's more to say (an ambiguous CSV row, a missing column). */
     reason?: string;
 }
-/** Recomputes all four tier fingerprints for a target, or reports it unresolved (file/symbol not found). */
+/** The fingerprint version an anchor was stamped with (anchors from before versions are version 1). */
+export declare const versionOf: (anchor: Pick<Anchor, "fingerprintVersion">) => number;
+/**
+ * Recomputes all four tier fingerprints for a target, or reports it unresolved (file/symbol not found).
+ * `version` is how to compute them: the current way to stamp, an anchor's own to compare with it.
+ */
 export declare function resolveTarget(repoRoot: string, target: {
     path: string;
     symbol?: string;
-}, config: LockwireConfig): Promise<TargetResolution | null>;
+}, config: LockwireConfig, version?: number): Promise<TargetResolution | null>;
 /**
  * {@link resolveTarget} on given file contents rather than the file on disk — used to fingerprint a
  * target as it was at an earlier commit. `source` is the bound symbol's declaration as written.
@@ -25,7 +30,7 @@ export declare function resolveTarget(repoRoot: string, target: {
 export declare function resolveTargetInText(target: {
     path: string;
     symbol?: string;
-}, content: string, config: LockwireConfig): Promise<TargetResolution & {
+}, content: string, config: LockwireConfig, version?: number): Promise<TargetResolution & {
     source?: string;
 }>;
 /**
@@ -36,7 +41,13 @@ export declare function resolveTargetInText(target: {
  * unrelated neighbour with the same shape isn't mistaken for the rename target. Cross-file
  * relocation (the symbol moved to a different file) is not attempted in P0 — see docs/concepts.md limitations.
  */
-export declare function findRelocationCandidate(symbols: FileSymbols, missingSigFp: string, oldName: string, taken?: ReadonlySet<string>): string | null;
+export declare function findRelocationCandidate(symbols: FileSymbols, missingSigFp: string, oldName: string, taken?: ReadonlySet<string>, 
+/**
+ * The vanished symbol's stamped body and deps. When given, a candidate must also match one of them:
+ * a rename keeps the implementation, while a deleted function's look-alike neighbour (same
+ * parameters, different code) is not where its claim went.
+ */
+stamped?: Pick<Fingerprints, "body" | "deps">): string | null;
 export interface LinkResult {
     created: number;
     refreshed: number;

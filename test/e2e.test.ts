@@ -247,7 +247,7 @@ describe("regressions found by adversarial testing", () => {
 
     await writeFile(
       join(repo, "src", "session.ts"),
-      SESSION_TS.replace("createSession", "openSession").replace("mint(userId)", "forge(userId)"),
+      SESSION_TS.replace("createSession", "openSession").replace("{ token, ttl }", "{ token, ttl, v: 2 }"),
       "utf8",
     );
     const first = (await check(repo, DEFAULT_CONFIG)).results[0]!;
@@ -372,10 +372,11 @@ describe("stacked markers and the relocated count", () => {
     expect(first.summary.fresh).toBe(1);
     expect((await check(repo, DEFAULT_CONFIG)).summary.relocated).toBe(0); // already relinked
 
-    // A rename that also changes the body still counts as relocated, and as drifted.
+    // A rename that also changes the body still counts as relocated, and as drifted. (It must keep
+    // either the body or the calls: one that changes both is a different function, and is orphaned.)
     await writeFile(
       join(repo, "src", "session.ts"),
-      SESSION_TS.replace("createSession", "startSession").replace("mint(userId)", "forge(userId)"),
+      SESSION_TS.replace("createSession", "startSession").replace("{ token, ttl }", "{ token, ttl, v: 2 }"),
       "utf8",
     );
     const second = await check(repo, DEFAULT_CONFIG);
