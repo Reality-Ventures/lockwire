@@ -37,7 +37,7 @@ export interface ClaimNumber {
  * hide it (`12.5ms` states 12.5), and a magnitude suffix scales it (`1.2B`, `3.5k`, `2 million`). A
  * hyphen between two numbers is a range, not a minus (`0.18-0.24`, LaTeX's `15--29`).
  */
-export declare function claimNumbers(text: string): ClaimNumber[];
+export declare function claimNumbers(claim: string): ClaimNumber[];
 export interface ClaimCheck {
     /** False when the sentence states nothing that can be compared with this value. */
     checkable: boolean;

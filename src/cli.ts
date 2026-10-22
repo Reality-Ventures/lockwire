@@ -300,7 +300,9 @@ async function main() {
       if (!ref) throw new Error("usage: lockwire history <anchor-id | path#symbol | doc.md>");
       const { events } = await history(repoRoot, ref);
       if (events.length === 0) {
-        console.error(`no history for ${ref}: no anchor id, path#symbol or doc in the ledger matches it`);
+        console.error(
+          `no history for ${ref}: no anchor id, path#symbol or doc in the ledger matches it`,
+        );
         process.exitCode = 1;
       }
       for (const e of events)

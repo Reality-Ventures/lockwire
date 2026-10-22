@@ -237,3 +237,62 @@ describe("marker targets are normalised", () => {
     expect(lock.anchors[0].target).toEqual({ path: "src/a.ts", symbol: "alpha" });
   });
 });
+
+describe("numbers that don't state the value (found on benchmark READMEs)", () => {
+  it("references, footnotes and citations state nothing", () => {
+    for (const s of [
+      "As Table 1 shows",
+      "see Section 2.3 and Fig. 4",
+      "by Eq. (3) and §5",
+      "on p. 12 of Appendix 2",
+      "as reported[^1]",
+      "as reported [12]",
+    ])
+      expect(values(s), s).toEqual([]);
+    // ...so a reference can't mask a wrong value any more.
+    expect(holds("In Table 1, o3-high reaches an MMLU accuracy of 0.933.", 0.71)).toBe(false);
+    expect(holds("In Table 1, o3-high reaches an MMLU accuracy of 0.933.", 0.9331)).toBe(true);
+  });
+
+  it("numbers inside hyphenated names state nothing", () => {
+    for (const s of ["gpt-4.1-2025-04-14", "Llama-3-70B", "top-1 accuracy", "COVID-19"])
+      expect(values(s), s).toEqual([]);
+    expect(values("gpt-4.1 scores 0.83 and the interval is 0.18-0.24")).toEqual([0.83, 0.18, 0.24]);
+    expect(values("a 3-layer MLP")).toEqual([3]); // a count before the hyphen still counts
+  });
+
+  it("markdown emphasis with underscores doesn't hide a number", () => {
+    expect(values("The upper bound is __0.50__.")).toEqual([0.5]);
+    expect(values("accuracy _0.93_")).toEqual([0.93]);
+    expect(values("see x_2 and 0.18_lo")).toEqual([]);
+  });
+
+  it("a minus in a table cell or list is a sign", () => {
+    expect(values("| -0.18 |")).toEqual([-0.18]);
+    expect(values("|-0.18|")).toEqual([-0.18]);
+    expect(values("deltas 0.2,-0.3")).toEqual([0.2, -0.3]);
+    expect(holds("|-0.18|", 0.18)).toBe(false);
+  });
+
+  it("\\pm in the sentence or the value states both numbers", () => {
+    expect(values("$0.18\\pm0.02$")).toEqual([0.18, 0.02]);
+    expect(holds("0.18 ± 0.02", "$0.18\\pm0.02$")).toBe(true);
+    expect(holds("0.18 ± 0.09", "$0.18\\pm0.02$")).toBe(false);
+  });
+});
+
+describe("LaTeX number formats (found on real papers)", () => {
+  const get = (tex: string, key: string) => resolveValue(tex, "tex", key);
+  it("{,} is a decimal comma unless three digits follow", () => {
+    expect(get("\\newcommand{\\a}{0{,}18}", "a").value).toBe(0.18);
+    expect(get("\\newcommand{\\a}{1{,}5}", "a").value).toBe(1.5);
+    expect(get("\\newcommand{\\a}{12{,}345}", "a").value).toBe(12345);
+    expect(get("\\newcommand{\\a}{12{,}345{,}678}", "a").value).toBe(12345678);
+  });
+
+  it("\\num and \\SI with options are unwrapped", () => {
+    expect(get("\\newcommand{\\a}{\\num[round-precision=2]{0.1834}}", "a").value).toBe(0.1834);
+    expect(get("\\newcommand{\\a}{\\SI[per-mode=symbol]{12.5}{ms}}", "a").value).toBe(12.5);
+    expect(holds("The value is 0.18.", "\\num[round-precision=2]{0.1834}")).toBe(true);
+  });
+});

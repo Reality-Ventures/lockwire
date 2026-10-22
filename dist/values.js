@@ -218,13 +218,18 @@ function texMacros(source) {
     }
     return out;
 }
+/**
+ * LaTeX's `{,}` is a thousands separator before exactly three digits (`12{,}345`) and a decimal comma
+ * otherwise (`0{,}18`, `1{,}5`, as German-style papers write them).
+ */
+const texCommas = (s) => s.replace(/(\d*)\{,\}(?=(\d+))/g, (_, whole, frac) => frac.length === 3 && whole !== "0" ? whole : `${whole}.`);
 /** Strip the LaTeX that typically wraps a generated number: `\num{0.18}`, `$0.18$`, `0.18\%`, `\SI{3}{ms}`, in any combination. */
 function texValue(body) {
     let s = body.trim();
     for (;;) {
         const unwrapped = s
-            .replace(/^\\(?:num|ensuremath|text|mathrm|textrm)\s*\{([\s\S]*)\}$/, "$1")
-            .replace(/^\\SI\s*\{([^}]*)\}\s*\{[^}]*\}$/, "$1")
+            .replace(/^\\(?:num|ensuremath|text|mathrm|textrm)\s*(?:\[[^\]]*\])?\s*\{([\s\S]*)\}$/, "$1")
+            .replace(/^\\SI\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}\s*\{[^}]*\}$/, "$1")
             .replace(/^\$([\s\S]*)\$$/, "$1")
             .replace(/^([\s\S]*?)\s*\\%$/, "$1")
             .trim();
@@ -232,18 +237,18 @@ function texValue(body) {
             break;
         s = unwrapped;
     }
-    const core = s.replace(/\{,\}/g, "").replace(/\\,/g, "");
+    const core = texCommas(s).replace(/\\,/g, "");
     if (/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/.test(core))
         return Number(core);
     return body.trim();
 }
 /** LaTeX markup in a string value, rendered as the plain text a sentence would contain. */
 function texToPlain(s) {
-    return s
-        .replace(/\\(?:num|ensuremath|text|mathrm|textrm|textbf|emph)\s*\{([^{}]*)\}/g, "$1")
-        .replace(/\\SI\s*\{([^}]*)\}\s*\{([^}]*)\}/g, "$1 $2")
+    return texCommas(s)
+        .replace(/\\(?:num|ensuremath|text|mathrm|textrm|textbf|emph)\s*(?:\[[^\]]*\])?\s*\{([^{}]*)\}/g, "$1")
+        .replace(/\\SI\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}\s*\{([^}]*)\}/g, "$1 $2")
+        .replace(/\\pm(?![A-Za-z])/g, " ± ")
         .replace(/\\%/g, "%")
-        .replace(/\{,\}/g, ",")
         .replace(/\\[,;: ]/g, "")
         .replace(/---?/g, "–")
         .replace(/~/g, " ")
@@ -307,20 +312,31 @@ const MAGNITUDES = {
 const ORDINAL = /^(?:st|nd|rd|th)$/i;
 const MINUS = new Set(["-", "−"]);
 /** What may come right before a minus sign that makes it a sign rather than a dash or a range. */
-const BEFORE_SIGN = /[\s([{=:~≈]/;
+const BEFORE_SIGN = /[\s([{=:~≈|,;*_]/;
+/**
+ * Words after which a number points somewhere instead of stating a quantity: "Table 1", "Section 2.3",
+ * "Fig. 4", "Eq. (3)", "§5", "p. 12".
+ */
+const REFERENCE_BEFORE = /(?:\b(?:tables?|tab\.|figures?|figs?\.|sections?|sec\.|eqs?\.|equations?|appendix|chapters?|ch\.|lines?|steps?|algorithms?|alg\.|theorems?|lemmas?|corollary|definition|footnotes?|pages?|pp?\.|listing|exhibit)\s*\(?|§\s*)$/i;
+/** A hyphenated name the number is part of: `gpt-4.1-2025-04-14`, `Llama-3-70B`, `top-1`, `COVID-19`. */
+const NAME_BEFORE = /(?<![\w.])[A-Za-z][\w.]*-(?:[\w.]+-)*$/;
 /**
  * Numbers a sentence states. Skips digits that are part of a word or identifier (`v2`, `x86`, `h264`,
  * `0.18_lo`, `0x1F`), version strings (`1.2.3`) and ordinals (`2nd`). A unit glued to a number doesn't
  * hide it (`12.5ms` states 12.5), and a magnitude suffix scales it (`1.2B`, `3.5k`, `2 million`). A
  * hyphen between two numbers is a range, not a minus (`0.18-0.24`, LaTeX's `15--29`).
  */
-export function claimNumbers(text) {
+export function claimNumbers(claim) {
+    // LaTeX in the sentence itself: `$0.18\pm0.02$` states 0.18 and 0.02.
+    const text = claim.replace(/\\pm(?![A-Za-z])/g, " ± ");
     const out = [];
     /** Where each single number sits in the text, for the range pass below (null for list items). */
     const spans = [];
     // The whole token at once (digits, commas between digits, any dotted parts), so a regex can never
     // backtrack into the integer part of `12.5ms`.
-    const re = /(?<![\w.])(\d(?:\d|,(?=\d))*(?:\.\d+)*|\.\d+)(?:[eE]([-+]?\d+)(?![\w]))?/g;
+    // An underscore run before or after is markdown emphasis (`__0.50__`, `_0.93_`), unless it joins the
+    // number to a word (`x_2`, `0.18_lo`).
+    const re = /(?<![A-Za-z0-9.])(?<![A-Za-z0-9]_+)(\d(?:\d|,(?=\d))*(?:\.\d+)*|\.\d+)(?:[eE]([-+]?\d+)(?![\w]))?/g;
     for (let m = re.exec(text); m; m = re.exec(text)) {
         const token = m[1] ?? "";
         const exp = m[2] === undefined ? 0 : Number(m[2]);
@@ -328,7 +344,13 @@ export function claimNumbers(text) {
         let end = re.lastIndex;
         // What follows: an identifier, an ordinal, a unit, a magnitude, a percent.
         const rest = text.slice(end);
-        if (/^_/.test(rest))
+        if (/^_+[A-Za-z0-9]/.test(rest))
+            continue;
+        const before = text.slice(Math.max(0, start - 40), start);
+        if (REFERENCE_BEFORE.test(before))
+            continue;
+        // A footnote or citation: `[^1]`, `[12]`.
+        if (/\[\^$/.test(before) || (/\[$/.test(before) && /^\]/.test(rest)))
             continue;
         let scale = 1;
         let suffix = /^[A-Za-zµμ]+/.exec(rest)?.[0] ?? "";
@@ -351,6 +373,9 @@ export function claimNumbers(text) {
         const pct = suffix ? null : /^\s*(?:%|\\%|percent\b)/.exec(text.slice(end));
         if (pct)
             end += pct[0].length;
+        // Part of a hyphenated name, unless it's a percentage (`v2-15%` states 15%).
+        if (!pct && NAME_BEFORE.test(before))
+            continue;
         const signed = MINUS.has(text[start - 1] ?? "") && (start === 1 || BEFORE_SIGN.test(text[start - 2] ?? ""));
         // A comma run that isn't a thousands pattern is a list (1,2,3): each item is its own number.
         const literals = /,/.test(token) && !/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(token) ? token.split(",") : [token];

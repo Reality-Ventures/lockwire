@@ -566,8 +566,7 @@ export async function findUnlinkedMarkers(
             : abs !== undefined && !existsSync(abs)
               ? `not linked: ${m.target.path} doesn't exist`
               : "not linked yet";
-      }
-      else if (!anchor) reason = `id ${m.id} matches no anchor`;
+      } else if (!anchor) reason = `id ${m.id} matches no anchor`;
       else if (seenIds.has(m.id)) reason = `id ${m.id} appears twice in this doc`;
       else if (anchor.doc && anchor.doc !== doc) {
         const stillThere = (await readMarkers(anchor.doc))?.some((x) => x.id === m.id);
