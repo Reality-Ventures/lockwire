@@ -16,8 +16,10 @@ Scans `<doc.md>` for `<!-- lockwire <target> [tiers] [id=<id>] -->` markers, res
 
 - A marker with no `id=` is a **new** claim: an anchor is created, and the marker line in the doc is rewritten in place to add `id=<new-id>`.
 - A marker with an `id=` **refreshes** an existing anchor's fingerprints to the current code state.
-- Refreshing an anchor that is currently `drifted` requires `--reviewed` — this is the relink gate, so a stale claim can't be silently re-stamped by an automated pass without a human or agent explicitly saying "I looked at this."
-  The gate applies to an anchor that is `drifted`, or `orphaned` and whose symbol has come back changed. It doesn't apply when the code still matches and only the claim sentence moved, so editing a sentence or restoring a deleted marker over unchanged code re-links freely.
+- Refreshing an anchor whose bound code changed since it was stamped requires `--reviewed` — this is the relink gate, so a stale claim can't be silently re-stamped by an automated pass without a human or agent explicitly saying "I looked at this." `link` compares the code itself, so the gate holds whether or not a `check` has recorded the drift yet.
+  It doesn't apply when the code still matches and only the claim sentence moved, so editing a sentence or restoring a deleted marker over unchanged code re-links freely; nor to a value anchor whose sentence now states the new value, since that edit is the fix.
+- A marker whose anchor is already fresh and current is left alone: re-running `link` on an unchanged doc writes nothing and adds nothing to the ledger, and reports those markers as `unchanged`.
+- `link` exits `1` when it leaves any marker unlinked (a missing target, the gate, a tier typo, a sentence that states a different value), after printing why for each.
 - If `check` relocated the anchor to a renamed symbol, the marker still names the old one. `link` follows the anchor, rewrites the marker to the new name (keeping its tiers and id), and records the retarget in the ledger. `check` prints a note when this is pending.
 
 ```bash
@@ -27,7 +29,9 @@ lockwire link CLAUDE.md --reviewed
 
 ### `lockwire link [--reviewed]` (no doc)
 
-Links every doc the config selects — [`docs` and `exclude`](#configuration-lockwireconfigjson) — that contains at least one marker, and prints one line per doc plus a total. Docs without markers are never read for writing, so they are left byte-for-byte alone, and a marker inside a fenced code block is an example, not a binding. Naming a doc explicitly ignores `docs`/`exclude`.
+Links every doc the config selects — [`docs` and `exclude`](#configuration-lockwireconfigjson) — that contains at least one marker, and prints one line per doc plus a total. Docs without markers are never read for writing, so they are left byte-for-byte alone, and a marker inside a fenced or indented code block is an example, not a binding. A symlinked doc is skipped (the file it points to is linked instead, so no claim is bound twice), and naming one links the file it points to without replacing the link. Naming a doc explicitly ignores `docs`/`exclude`.
+
+**Marker forms.** A marker may follow a list bullet or blockquote `>` (`- <!-- lockwire src/a.ts#f -->`). In MDX, where an HTML comment isn't valid, write `{/* lockwire src/a.ts#f */}`; `link` stamps it in the same form. Tiers can be separated by commas or spaces (`sig,body`, `sig, body`, `sig body`), and a word that isn't a tier is refused with the list of tiers rather than ignored. A marker with no sentence after it is reported, not silently skipped.
 
 ```bash
 lockwire link
@@ -50,7 +54,7 @@ Recomputes fingerprints for every anchor, compares against the stored value for 
 
 Scoping — anchors outside the scope aren't examined, aren't reported, and can't fail the run:
 
-- `paths…` — anchors whose target **or doc** is one of these paths, or is inside one of them that is a directory. Paths resolve against your cwd.
+- `paths…` — anchors whose target **or doc** is one of these paths, or is inside one of them that is a directory. Paths resolve against your cwd. A path that doesn't exist and that no anchor names is an error, so a typo can't check nothing and pass.
 - `--changed` — anchors on files this branch touched: everything that differs from the merge base with the base branch (committed, uncommitted and untracked). Both sides of a rename count, so a moved file orphans its anchors. A doc edit counts too, which is how a rewritten claim gets caught. The base is `--base <ref>`, else `origin/$GITHUB_BASE_REF` in a pull-request job, else `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. If none exists, `check` stops and says so instead of guessing.
 - `--staged` — only what's staged for the next commit (for a pre-commit hook).
 
@@ -115,7 +119,7 @@ single-hash would flag 3 · lockwire flagged 1 · noise −66.7%
 
 | Key | Default | Effect |
 |---|---|---|
-| `docs` | `["**/*.md"]` | Globs of the docs that `lockwire link` (with no argument) scans for markers. |
+| `docs` | `["**/*.md", "**/*.mdx"]` | Globs of the docs that `lockwire link` (with no argument) scans for markers. |
 | `exclude` | `["node_modules/**", "dist/**", "**/CHANGELOG.md"]` | Globs that scan skips. `.git`, `node_modules` and `.lockwire` are always skipped. |
 | `normalizeLocals` | `true` | Alias local variables in the `body` fingerprint, so renaming a local isn't drift. Changing it changes every `body` fingerprint, so re-link afterwards. |
 | `hook.mode` | `"advisory"` | What the `PreToolUse` hook does: `advisory`, `ask` or `deny` — see [agents.md](agents.md#hook-modes). |
@@ -162,7 +166,7 @@ lockwire refs src/auth/session.ts#createSession
 
 ## `lockwire history <anchor-id | path#symbol | doc.md>`
 
-Prints the ledger timeline for an anchor, every anchor targeting a symbol, or every anchor bound to a doc — whichever the argument resolves to. See [docs/ledger.md](ledger.md) for the event vocabulary.
+Prints the ledger timeline for an anchor, every anchor targeting a symbol, or every anchor bound to a doc — whichever the argument resolves to, and exits `1` with a message when nothing matches. See [docs/ledger.md](ledger.md) for the event vocabulary.
 
 ```bash
 lockwire history k7q2m9xv
@@ -180,7 +184,7 @@ lockwire ack k7q2m9xv --resolution updated --note "doc rewritten to match the ne
 
 ## `lockwire waive <id> --reason "..." --expires <date>`
 
-A time-boxed, logged waiver — sets status to `waived` and logs `waiver.granted`. `--expires` must be a real ISO date in the future (`2026-10-15`, or a full timestamp; a bare date means 00:00 UTC that day); anything else is rejected. `check` skips a waived anchor until the expiry passes. At that point the waiver is dropped, `waiver.expired` is logged, and the anchor is re-evaluated from the code like any other: fresh if nothing moved while it was waived, drifted (with the tiers that moved) if something did. There is no permanent suppression in lockwire; every waiver has an expiry, and a stored expiry that doesn't parse counts as already expired.
+A time-boxed, logged waiver — sets status to `waived` and logs `waiver.granted`. `--expires` must be a real ISO date in the future (`2026-10-15`, or a full timestamp; a bare date means 00:00 UTC that day); anything else is rejected, including a day that doesn't exist (`2027-02-31`). `check` skips a waived anchor until the expiry passes. At that point the waiver is dropped, `waiver.expired` is logged, and the anchor is re-evaluated from the code like any other: fresh if nothing moved while it was waived, drifted (with the tiers that moved) if something did. There is no permanent suppression in lockwire; every waiver has an expiry, and a stored expiry that doesn't parse counts as already expired.
 
 ```bash
 lockwire waive k7q2m9xv --reason "signature change ships with the v2 API next sprint" --expires 2026-10-15
@@ -204,7 +208,7 @@ Removes an anchor from `lockwire.lock` entirely. Use this when a claim itself is
 
 ## `lockwire ledger verify`
 
-Recomputes every ledger event's hash and reports any that don't match, plus a BLAKE3 root over the set of valid hashes (order-independent by design — see [docs/ledger.md](ledger.md)).
+Recomputes every ledger event's hash and reports any that don't match (by line number, counting from 1), plus a BLAKE3 root over the set of valid hashes (order-independent by design — see [docs/ledger.md](ledger.md)).
 
 ```bash
 lockwire ledger verify

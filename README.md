@@ -261,7 +261,7 @@ CLAUDE.md
 single-hash would flag 1 · lockwire flagged 1 · noise −0%
 ```
 
-Update the doc, then re-stamp — `--reviewed` is required because this anchor is currently `drifted`:
+Update the doc, then re-stamp — `--reviewed` is required because the code changed since the claim was stamped:
 
 ```bash
 $ lockwire link CLAUDE.md --reviewed
