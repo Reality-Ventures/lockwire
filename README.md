@@ -13,6 +13,7 @@
 The mark is literal, not a metaphor: [lockwiring](https://en.wikipedia.org/wiki/Safety_wire) is the aviation-maintenance technique of threading wire through two fasteners so neither can work loose under vibration — the same idea applied to a doc claim and the code it depends on.
 
 [![npm](https://img.shields.io/npm/v/lockwire)](https://www.npmjs.com/package/lockwire)
+[![Socket](https://socket.dev/api/badge/npm/package/lockwire)](https://socket.dev/npm/package/lockwire)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/lockwire)](https://bundlephobia.com/package/lockwire)
 [![license: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8A63D2)](https://code.claude.com/docs/en/plugins)

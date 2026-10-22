@@ -20,3 +20,9 @@ Every hook handler fails open: an exception writes to `.lockwire/hook.log` and t
 ## Supply chain
 
 lockwire's runtime dependencies are `@modelcontextprotocol/sdk`, `@noble/hashes`, `web-tree-sitter`, and `zod`, all pinned to exact versions in `package.json`. Grammar `.wasm` files are copied at build time from pinned `devDependencies` (`tree-sitter-typescript`, `tree-sitter-javascript`, `tree-sitter-python`) and shipped inside the published npm package under `grammars/` — they are not fetched at install or run time.
+
+- **No install scripts.** lockwire has no `preinstall`/`install`/`postinstall`, and CI installs with `--ignore-scripts`.
+- **Provenance.** Every release is published from the `Release` workflow through npm trusted publishing (OIDC, no long-lived token), with a SLSA provenance attestation linking the tarball to the commit and workflow run that built it. Check it with `npm audit signatures` after installing, or see the provenance panel on [npmjs.com](https://www.npmjs.com/package/lockwire).
+- **Gated publishing.** A release publishes only after the full test suite passes on Ubuntu and Windows for that commit.
+- **Pinned CI.** GitHub Actions are pinned to commit SHAs, the CI job's token is read-only, and the npm used to publish is pinned to an exact version.
+- **Scanned.** Each published version is analysed by [Socket](https://socket.dev/npm/package/lockwire). The MCP SDK brings in an HTTP stack (express, hono, cors, jose and others) that lockwire never loads, since its MCP server only speaks stdio; alerts on those packages are inherited from the SDK. Expected alerts on lockwire itself: shell access (it runs `git`, and `autofix` starts the agent you choose), environment variables (`CI` and `GITHUB_BASE_REF` to pick a diff base, `CLAUDECODE`/`CODEX_*` to tell which agent is running; `autofix` passes the environment, API key included, to the agent it starts) and filesystem access (it reads your repository).

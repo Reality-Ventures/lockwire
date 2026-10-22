@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ## [Unreleased]
 
+### Security
+
+- `@modelcontextprotocol/sdk` 1.30.1 → 1.32.1, which fixes five advisories (GHSA-6qxp-vccf-f47h, GHSA-22jm-h49p-29qw, GHSA-6prh-2h8m-c8cw, GHSA-46jr-4wx8-v453, GHSA-rvq5-wwqv-78pq), and its `hono` to 4.13.13 (GHSA-5r4p-p66f-jhc7). They're in the SDK's HTTP and OAuth code, which lockwire's stdio-only server never loads, but they were flagged on every install. `npm audit` is now clean. Also `zod` 4.6.7, `web-tree-sitter` 0.27.1 and, for development, `vitest` 4.1.12.
+- CI pins GitHub Actions to commit SHAs and runs with a read-only token; the release job pins the npm it publishes with. SECURITY.md describes the supply-chain setup (provenance, no install scripts, gated publishing) and the alerts to expect from scanners.
+
 ### Fixed
 
 Found by running lockwire on ky, hono, zod, httpx, click, requests, pydantic, express, jotai and a benchmark repository; each finding has a regression test.
