@@ -205,6 +205,10 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
             continue;
         }
         const targetLabel = `${marker.target.path}${marker.target.symbol ? `#${marker.target.symbol}` : ""}`;
+        if (marker.problem) {
+            result.skipped.push({ reason: marker.problem, target: targetLabel });
+            continue;
+        }
         let existing = marker.id ? current.anchors.find((a) => a.id === marker.id) : undefined;
         // A marker copy-pasted into another doc carries the original's id. If the original doc still
         // holds that marker, this is a second claim, not the same one moved -- binding it to the
@@ -454,7 +458,9 @@ repoRoot) {
         for (const m of markers) {
             let reason = null;
             const anchor = m.id ? lockfile.anchors.find((a) => a.id === m.id) : undefined;
-            if (!m.id) {
+            if (!m.id && m.problem)
+                reason = `not linked: ${m.problem}`;
+            else if (!m.id) {
                 const abs = repoRoot ? resolveInsideRepo(repoRoot, m.target.path) : undefined;
                 // `link` can't fix a marker that points nowhere: say what's wrong with it instead.
                 reason =

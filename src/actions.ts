@@ -322,6 +322,10 @@ export async function linkDoc(
       continue;
     }
     const targetLabel = `${marker.target.path}${marker.target.symbol ? `#${marker.target.symbol}` : ""}`;
+    if (marker.problem) {
+      result.skipped.push({ reason: marker.problem, target: targetLabel });
+      continue;
+    }
     let existing = marker.id ? current.anchors.find((a) => a.id === marker.id) : undefined;
 
     // A marker copy-pasted into another doc carries the original's id. If the original doc still
@@ -621,7 +625,7 @@ export function markerReader(repoRoot: string) {
 }
 
 /** The part of a marker needed to classify it and show its claim; DocMarker and the doc index both have it. */
-export type MarkerView = Pick<DocMarker, "id" | "target" | "line" | "claimExcerpt">;
+export type MarkerView = Pick<DocMarker, "id" | "target" | "line" | "claimExcerpt" | "problem">;
 
 /**
  * Markers in `docs` that no anchor in `lockfile` backs: no `id=` yet, an id that matches no anchor, an
@@ -643,7 +647,8 @@ export async function findUnlinkedMarkers(
     for (const m of markers) {
       let reason: string | null = null;
       const anchor = m.id ? lockfile.anchors.find((a) => a.id === m.id) : undefined;
-      if (!m.id) {
+      if (!m.id && m.problem) reason = `not linked: ${m.problem}`;
+      else if (!m.id) {
         const abs = repoRoot ? resolveInsideRepo(repoRoot, m.target.path) : undefined;
         // `link` can't fix a marker that points nowhere: say what's wrong with it instead.
         reason =

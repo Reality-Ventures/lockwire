@@ -13,6 +13,8 @@ export interface DocMarker {
     claimExcerpt: string;
     /** The whole claim, whitespace-collapsed: what a value anchor's number is checked against. */
     claimText: string;
+    /** Why this marker can't be linked as written (an unknown tier, no claim after it), if it can't. */
+    problem?: string;
 }
 /** Scans a markdown document's text for `<!-- lockwire <target> [tiers] [id=<id>] -->` markers. */
 export declare function scanMarkers(text: string): DocMarker[];

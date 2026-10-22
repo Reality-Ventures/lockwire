@@ -121,7 +121,7 @@ export interface LockwireConfig {
 
 export const DEFAULT_CONFIG: LockwireConfig = {
   version: 1,
-  docs: ["**/*.md"],
+  docs: ["**/*.md", "**/*.mdx"],
   exclude: ["node_modules/**", "dist/**", "**/CHANGELOG.md"],
   normalizeLocals: true,
   hook: { mode: "advisory", maxClaimsInContext: 8, unlinkedClaims: true },

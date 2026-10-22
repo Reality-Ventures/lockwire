@@ -13,6 +13,7 @@ export interface IndexedMarker {
     };
     id: string | null;
     claimExcerpt: string;
+    problem?: string;
 }
 interface DocEntry {
     mtimeMs: number;

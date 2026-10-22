@@ -117,9 +117,12 @@ describe("scanMarkers with stacked and adjacent markers", () => {
     expect(found.map((x) => x.claimExcerpt)).toEqual(["First claim.", "Second claim."]);
   });
 
-  it("stacked markers with no sentence beneath them bind nothing", () => {
-    expect(scanMarkers([m("alpha"), m("beta")].join("\n"))).toEqual([]);
-    expect(scanMarkers([m("alpha"), m("beta"), ""].join("\n"))).toEqual([]);
+  it("stacked markers with no sentence beneath them bind nothing, and say so", () => {
+    for (const doc of [[m("alpha"), m("beta")], [m("alpha"), m("beta"), ""]]) {
+      const found = scanMarkers(doc.join("\n"));
+      expect(found).toHaveLength(2);
+      for (const x of found) expect(x.problem).toBe("no claim follows the marker");
+    }
   });
 
   it("stacked markers above a fenced code block claim all capture the whole block", () => {

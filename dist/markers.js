@@ -1,23 +1,65 @@
 import { posix } from "node:path";
 import { fingerprint } from "./hash.js";
 import { ALL_TIERS } from "./types.js";
-const MARKER_RE = /^<!--\s*lockwire\s+(.+?)\s*-->\s*$/;
-const FENCE_RE = /^\s*(`{3,}|~{3,})(.*)$/;
+/**
+ * A marker line: `<!-- lockwire … -->`, or MDX's `{/* lockwire … *\/}` (an HTML comment isn't valid MDX).
+ * It may sit after a list bullet or blockquote `>`s (`- <!-- lockwire … -->`): group 1 is that prefix.
+ */
+const MARKER_RE = /^(\s*(?:>\s*)*(?:(?:[-*+]|\d{1,9}[.)])\s+)?)(?:<!--\s*lockwire\s+(.+?)\s*-->|\{\/\*\s*lockwire\s+(.+?)\s*\*\/\})\s*$/;
+const FENCE_RE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
 const TIER_SET = new Set(ALL_TIERS);
+function parseMarkerLine(line) {
+    const m = MARKER_RE.exec(line.replace(/^\uFEFF/, ""));
+    if (!m)
+        return null;
+    return { prefix: m[1] ?? "", body: m[2] ?? m[3] ?? "", mdx: m[3] !== undefined };
+}
+const isMarkerLine = (line) => parseMarkerLine(line) !== null;
+/** Leading spaces, a tab counting as four. */
+const indentOf = (line) => {
+    let n = 0;
+    for (const c of line) {
+        if (c === " ")
+            n++;
+        else if (c === "\t")
+            n += 4 - (n % 4);
+        else
+            break;
+    }
+    return n;
+};
+const LIST_ITEM = /^\s*(?:[-*+]|\d{1,9}[.)])\s/;
 /** Scans a markdown document's text for `<!-- lockwire <target> [tiers] [id=<id>] -->` markers. */
 export function scanMarkers(text) {
     const lines = text.split(/\r?\n/);
     const markers = [];
     // Fenced code blocks hold examples (this repo's own docs show markers inside ```markdown), not
-    // live bindings, so nothing between an opening and closing fence is scanned.
+    // live bindings, so nothing between an opening and closing fence is scanned. Nor is an indented
+    // code block: four spaces in after a blank line, outside a list.
     let fence = null;
+    let indentedCode = false;
+    let inList = false;
+    let prevBlank = true;
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i] ?? "";
-        const fenceLine = FENCE_RE.exec(line);
+        const blank = line.trim() === "";
+        if (!fence) {
+            if (indentedCode && !blank && indentOf(line) < 4)
+                indentedCode = false;
+            if (!indentedCode && prevBlank && !blank && indentOf(line) >= 4 && !inList)
+                indentedCode = true;
+            if (!blank && indentOf(line) < 4 && !indentedCode)
+                inList = LIST_ITEM.test(line) || (inList && !prevBlank) || (inList && indentOf(line) >= 2);
+            prevBlank = blank;
+            if (indentedCode)
+                continue;
+        }
+        // Inside a list a fence may be indented to the item's content; elsewhere it's at most 3 spaces in.
+        const fenceLine = FENCE_RE.exec(inList ? line.trimStart() : line);
         if (fenceLine) {
-            const run = fenceLine[1] ?? "";
+            const run = fenceLine[2] ?? "";
             const char = run[0] ?? "`";
-            const rest = fenceLine[2] ?? "";
+            const rest = fenceLine[3] ?? "";
             if (fence) {
                 if (char === fence.char && run.length >= fence.len && rest.trim() === "")
                     fence = null;
@@ -31,23 +73,28 @@ export function scanMarkers(text) {
         }
         if (fence)
             continue;
-        const m = MARKER_RE.exec(line.trim());
+        const m = parseMarkerLine(line);
         if (!m)
             continue;
-        const tokens = markerTokens(m[1] ?? "").map((t) => t.value);
+        const tokens = markerTokens(m.body).map((t) => t.value);
         const targetToken = tokens[0];
         if (!targetToken)
             continue;
-        let tiers = null;
+        // Tiers may be written `sig,body`, `sig, body` or `sig body`; a word that isn't a tier is a typo
+        // to report, never something to drop silently (which would bind the default tiers instead).
         let id = null;
+        const tierWords = [];
         for (const tok of tokens.slice(1)) {
-            if (tok.startsWith("id=")) {
+            if (tok.startsWith("id="))
                 id = tok.slice(3);
-            }
-            else if (tok.split(",").every((t) => TIER_SET.has(t))) {
-                tiers = tok.split(",");
-            }
+            else
+                tierWords.push(...tok.split(",").filter(Boolean));
         }
+        const unknown = tierWords.filter((t) => !TIER_SET.has(t));
+        const tiers = tierWords.length > 0 && unknown.length === 0 ? [...new Set(tierWords)] : null;
+        let problem = unknown.length > 0
+            ? `unknown tier${unknown.length === 1 ? "" : "s"} ${unknown.map((t) => `"${t}"`).join(", ")} (the tiers are ${ALL_TIERS.join(", ")})`
+            : undefined;
         const hash = targetToken.indexOf("#");
         const rawPath = hash < 0 ? targetToken : targetToken.slice(0, hash);
         const symbol = hash < 0 ? undefined : targetToken.slice(hash + 1);
@@ -55,9 +102,13 @@ export function scanMarkers(text) {
             continue;
         // `./src/a.ts` and `src/./a.ts` are claims about src/a.ts: normalise the way the hooks compare.
         const path = posix.normalize(rawPath.replace(/\\/g, "/")).replace(/^(?:\.\/)+/, "");
-        const { claimLine, text: claimText } = captureFollowingBlock(lines, i + 1);
-        if (claimLine === -1)
-            continue;
+        let { claimLine, text: claimText } = captureFollowingBlock(lines, i + 1);
+        if (claimLine === -1) {
+            // Nothing after it to bind: still a marker, so it's reported rather than silently ignored.
+            problem ??= "no claim follows the marker";
+            claimLine = i + 1;
+            claimText = "";
+        }
         markers.push({
             line: i + 1,
             target: { path, ...(symbol ? { symbol } : {}) },
@@ -68,6 +119,7 @@ export function scanMarkers(text) {
             claimNormHash: fingerprint(flatten(claimText)),
             claimExcerpt: excerpt(claimText),
             claimText: flatten(claimText),
+            ...(problem ? { problem } : {}),
         });
     }
     return markers;
@@ -78,8 +130,8 @@ function captureFollowingBlock(lines, startIdx) {
     // Skip blanks and any further markers stacked above the same sentence: they all bind it, and none
     // of them is part of it.
     while (i < lines.length) {
-        const t = (lines[i] ?? "").trim();
-        if (t !== "" && !MARKER_RE.test(t))
+        const l = lines[i] ?? "";
+        if (l.trim() !== "" && !isMarkerLine(l))
             break;
         i++;
     }
@@ -104,7 +156,7 @@ function captureFollowingBlock(lines, startIdx) {
         // A marker line ends the paragraph: it belongs to the next claim, not this one.
         while (i < lines.length) {
             const l = lines[i] ?? "";
-            if (l.trim() === "" || MARKER_RE.test(l.trim()))
+            if (l.trim() === "" || isMarkerLine(l))
                 break;
             collected.push(l);
             i++;
@@ -143,25 +195,30 @@ export function claimUnchanged(stored, current) {
 }
 /** Rewrites a marker line to carry its stamped id, preserving any tier spec already present and whatever precedes the marker (indentation, a BOM). */
 export function stampMarkerLine(line, id) {
-    const m = MARKER_RE.exec(line.trim());
+    const m = parseMarkerLine(line);
     if (!m)
         return line;
-    const prefix = /^\s*/.exec(line)?.[0] ?? "";
-    const tokens = markerTokens(m[1] ?? "")
+    const tokens = markerTokens(m.body)
         .filter((t, i) => i === 0 || !t.value.startsWith("id="))
         .map((t) => t.raw);
     tokens.push(`id=${id}`);
-    return `${prefix}<!-- lockwire ${tokens.join(" ")} -->`;
+    return writeMarkerLine(line, m, tokens);
+}
+/** The marker line with new words, in the syntax it was written in, after what preceded it. */
+function writeMarkerLine(line, m, tokens) {
+    const bom = line.startsWith("\uFEFF") ? "\uFEFF" : "";
+    return m.mdx
+        ? `${bom}${m.prefix}{/* lockwire ${tokens.join(" ")} */}`
+        : `${bom}${m.prefix}<!-- lockwire ${tokens.join(" ")} -->`;
 }
 /** Rewrites a marker line's target (`path#Symbol`), keeping its tiers, id and whatever precedes it. */
 export function retargetMarkerLine(line, target) {
-    const m = MARKER_RE.exec(line.trim());
+    const m = parseMarkerLine(line);
     if (!m)
         return line;
-    const prefix = /^\s*/.exec(line)?.[0] ?? "";
-    const tokens = markerTokens(m[1] ?? "").map((t) => t.raw);
+    const tokens = markerTokens(m.body).map((t) => t.raw);
     tokens[0] = quoteTarget(`${target.path}${target.symbol ? `#${target.symbol}` : ""}`);
-    return `${prefix}<!-- lockwire ${tokens.join(" ")} -->`;
+    return writeMarkerLine(line, m, tokens);
 }
 /**
  * A marker's words: split on whitespace, except that a double-quoted word keeps its spaces — a target

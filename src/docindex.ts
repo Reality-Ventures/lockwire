@@ -26,7 +26,8 @@ import { scanMarkers } from "./markers.js";
 import { isScannedDoc, isSkippedEntry, resolveInsideRepo, stripBom } from "./repo.js";
 import type { LockwireConfig } from "./types.js";
 
-const INDEX_VERSION = 1;
+// 2: markers after list bullets and in MDX are found, and a marker that can't link says why.
+const INDEX_VERSION = 2;
 /** Timestamp granularity we guard against: HFS+ is 1 s, FAT 2 s. */
 export const RACY_MS = 2000;
 /** Rebuild from scratch at least this often, in case a filesystem didn't keep its mtimes honest. */
@@ -43,6 +44,7 @@ export interface IndexedMarker {
   target: { path: string; symbol?: string };
   id: string | null;
   claimExcerpt: string;
+  problem?: string;
 }
 
 interface DocEntry {
@@ -232,6 +234,7 @@ export async function loadDocIndex(
         target: m.target,
         id: m.id,
         claimExcerpt: m.claimExcerpt,
+        ...(m.problem ? { problem: m.problem } : {}),
       }));
     } catch {
       return; // unreadable now: leave it as it was; a later run will try again

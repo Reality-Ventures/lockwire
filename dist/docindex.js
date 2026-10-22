@@ -24,7 +24,8 @@ import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/prom
 import { join } from "node:path";
 import { scanMarkers } from "./markers.js";
 import { isScannedDoc, isSkippedEntry, resolveInsideRepo, stripBom } from "./repo.js";
-const INDEX_VERSION = 1;
+// 2: markers after list bullets and in MDX are found, and a marker that can't link says why.
+const INDEX_VERSION = 2;
 /** Timestamp granularity we guard against: HFS+ is 1 s, FAT 2 s. */
 export const RACY_MS = 2000;
 /** Rebuild from scratch at least this often, in case a filesystem didn't keep its mtimes honest. */
@@ -156,6 +157,7 @@ export async function loadDocIndex(repoRoot, config, opts = {}) {
                 target: m.target,
                 id: m.id,
                 claimExcerpt: m.claimExcerpt,
+                ...(m.problem ? { problem: m.problem } : {}),
             }));
         }
         catch {

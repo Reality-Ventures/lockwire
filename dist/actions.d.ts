@@ -136,7 +136,7 @@ export interface CheckResult {
 /** A cached reader of a doc's markers, or null when the doc doesn't exist. */
 export declare function markerReader(repoRoot: string): (doc: string) => Promise<DocMarker[] | null>;
 /** The part of a marker needed to classify it and show its claim; DocMarker and the doc index both have it. */
-export type MarkerView = Pick<DocMarker, "id" | "target" | "line" | "claimExcerpt">;
+export type MarkerView = Pick<DocMarker, "id" | "target" | "line" | "claimExcerpt" | "problem">;
 /**
  * Markers in `docs` that no anchor in `lockfile` backs: no `id=` yet, an id that matches no anchor, an
  * id that belongs to the marker in another doc (a copy-paste), or one used twice in a doc. Until

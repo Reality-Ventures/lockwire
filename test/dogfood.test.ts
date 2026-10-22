@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { check, discoverDocs, linkDoc } from "../src/actions.js";
 import { readLedger } from "../src/ledger.js";
 import { readLockfile } from "../src/lockfile.js";
+import { scanMarkers } from "../src/markers.js";
 import { DEFAULT_CONFIG } from "../src/types.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -202,5 +203,48 @@ describe("relocation after a symbol disappears", () => {
         "export function parseIdentifier(s: string): number {\n  return Number(s);\n}\n",
       ),
     ).toMatchObject({ relocated: 1, orphaned: 0 });
+  });
+});
+
+describe("markers as real docs write them", () => {
+  const one = (doc: string) => scanMarkers(doc).map((x) => ({ target: x.target, tiers: x.tiers, problem: x.problem }));
+
+  it("a tier typo is reported, not dropped in favour of the default", () => {
+    expect(one("<!-- lockwire a.ts#f sig,bdy -->\nf.\n")[0]?.problem).toMatch(/unknown tier "bdy"/);
+    expect(one("<!-- lockwire a.ts#f body,dep -->\nf.\n")[0]?.problem).toMatch(/"dep"/);
+    expect(one("<!-- lockwire a.ts#f sig, body -->\nf.\n")[0]?.tiers).toEqual(["sig", "body"]);
+    expect(one("<!-- lockwire a.ts#f sig body -->\nf.\n")[0]?.tiers).toEqual(["sig", "body"]);
+  });
+
+  it("markers after a list bullet or in a blockquote are found", () => {
+    expect(one("- <!-- lockwire a.ts#f -->\n  f does a thing.\n")).toHaveLength(1);
+    expect(one("1. <!-- lockwire a.ts#f -->\n   f does a thing.\n")).toHaveLength(1);
+    expect(one("> <!-- lockwire a.ts#f -->\n> f does a thing.\n")).toHaveLength(1);
+  });
+
+  it("MDX markers are found and stamped in MDX syntax", async () => {
+    const dir = await repo({ "a.ts": "export function f() {}\n", "A.mdx": "{/* lockwire a.ts#f */}\nf.\n" });
+    expect((await discoverDocs(dir, DEFAULT_CONFIG))).toContain("A.mdx");
+    expect((await linkDoc(dir, "A.mdx", DEFAULT_CONFIG, actor)).created).toBe(1);
+    expect(await readFile(join(dir, "A.mdx"), "utf8")).toMatch(/^\{\/\* lockwire a\.ts#f id=\w+ \*\/\}\n/);
+  });
+
+  it("an indented code block is an example, and an indented ``` in it opens no fence", () => {
+    const doc = "Example:\n\n    <!-- lockwire a.ts#f -->\n    ```\n\n<!-- lockwire a.ts#g -->\ng is live.\n";
+    expect(one(doc).map((x) => x.target.symbol)).toEqual(["g"]);
+  });
+
+  it("a fence indented inside a list item still hides its example", () => {
+    const doc = "- step:\n\n  ```md\n  <!-- lockwire a.ts#f -->\n  f.\n  ```\n";
+    expect(one(doc)).toEqual([]);
+  });
+
+  it("a marker at the end of a doc with no claim after it is reported", async () => {
+    const dir = await repo({ "a.ts": "export function f() {}\n", "A.md": "# A\n\n<!-- lockwire a.ts#f -->\n" });
+    const linked = await linkDoc(dir, "A.md", DEFAULT_CONFIG, actor);
+    expect(linked.skipped[0]?.reason).toBe("no claim follows the marker");
+    expect((await check(dir, DEFAULT_CONFIG)).unlinked[0]?.reason).toBe(
+      "not linked: no claim follows the marker",
+    );
   });
 });
