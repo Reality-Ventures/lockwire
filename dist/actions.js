@@ -55,7 +55,8 @@ export async function resolveTargetInText(target, content, config, version = FIN
     const lang = langForPath(target.path);
     if (!lang)
         throw new Error(`lockwire supports TypeScript, TSX, JavaScript, and Python source, and values in JSON, CSV, TSV and LaTeX (.tex) files — "${target.path}" is none of these`);
-    const parsed = await parseSource(target.path, content, lang, config, version);
+    // A symbol anchor never needs the whole file serialized, which is the costly part in a big file.
+    const parsed = await parseSource(target.path, content, lang, config, version, !target.symbol);
     const { symbols } = parsed;
     const pathFp = fingerprint(target.path);
     if (target.symbol) {
@@ -79,8 +80,8 @@ export async function resolveTargetInText(target, content, config, version = FIN
         fingerprints: {
             path: pathFp,
             sig: fileExportsFingerprint(symbols),
-            body: fingerprint(parsed.whole.bodyNormalized),
-            deps: fingerprintSet(parsed.whole.deps),
+            body: fingerprint(parsed.whole?.bodyNormalized ?? ""),
+            deps: fingerprintSet(parsed.whole?.deps ?? []),
         },
         symbols,
         source: content,
@@ -92,11 +93,11 @@ export async function resolveTargetInText(target, content, config, version = FIN
  * within the same millisecond can't be served stale.
  */
 const parseCache = new Map();
-const PARSE_CACHE_SIZE = 32;
-async function parseSource(path, content, lang, config, version) {
+const PARSE_CACHE_SIZE = 256;
+async function parseSource(path, content, lang, config, version, needWhole) {
     const key = `${version}|${config.normalizeLocals}|${lang}|${path}`;
     const hit = parseCache.get(key);
-    if (hit && hit.content === content) {
+    if (hit && hit.content === content && (hit.whole || !needWhole)) {
         parseCache.delete(key); // most recently used last
         parseCache.set(key, hit);
         return hit;
@@ -109,8 +110,12 @@ async function parseSource(path, content, lang, config, version) {
     try {
         parsed = {
             content,
-            symbols: extractFileSymbols(tree.rootNode, lang, config.normalizeLocals, version),
-            whole: computeWholeFileTiers(tree.rootNode, lang, config.normalizeLocals, version),
+            symbols: hit?.content === content
+                ? hit.symbols
+                : extractFileSymbols(tree.rootNode, lang, config.normalizeLocals, version),
+            ...(needWhole
+                ? { whole: computeWholeFileTiers(tree.rootNode, lang, config.normalizeLocals, version) }
+                : {}),
         };
     }
     finally {
