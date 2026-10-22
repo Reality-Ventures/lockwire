@@ -191,7 +191,7 @@ export async function loadDocIndex(repoRoot, config, opts = {}) {
                 continue;
             if (e.isDirectory())
                 dirs.push(child);
-            else if (isScannedDoc(child, config))
+            else if (!e.isSymbolicLink() && isScannedDoc(child, config))
                 docs.push(child);
         }
         return { dirs, docs };

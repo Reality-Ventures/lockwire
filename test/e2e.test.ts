@@ -344,8 +344,11 @@ describe("stacked markers and the relocated count", () => {
     expect((await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor)).created).toBe(2);
     expect((await check(repo, DEFAULT_CONFIG)).summary).toMatchObject({ anchors: 2, drifted: 0 });
 
-    // Re-linking the now-stamped doc is stable too.
-    expect((await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor)).refreshed).toBe(2);
+    // Re-linking the now-stamped doc is stable too: nothing changed, so nothing is re-stamped.
+    expect(await linkDoc(repo, "CLAUDE.md", DEFAULT_CONFIG, actor)).toMatchObject({
+      refreshed: 0,
+      unchanged: 2,
+    });
     expect((await check(repo, DEFAULT_CONFIG)).summary.drifted).toBe(0);
 
     await writeFile(join(repo, "CLAUDE.md"), doc("Totally different."), "utf8");

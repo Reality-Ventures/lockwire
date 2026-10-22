@@ -242,7 +242,7 @@ describe.skipIf(!existsSync(CLI))("the relocation hint", () => {
     expect(out).toContain("1 relocated");
     expect(out).toMatch(/note: 1 anchor relocated .*lockwire link CLAUDE\.md/);
     const linked = cli(dir, ["link", "CLAUDE.md"]).stdout;
-    expect(linked).toContain("2 refreshed");
+    expect(linked).toContain("1 refreshed, 1 unchanged");
     expect(linked).not.toContain("skipped");
     expect(await readFile(join(dir, "CLAUDE.md"), "utf8")).toContain("src/a.ts#alphaRenamed");
     expect(cli(dir, ["check"]).stdout).not.toContain("note:");

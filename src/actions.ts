@@ -24,6 +24,7 @@ import {
   stampMarkerLine,
 } from "./markers.js";
 import {
+  canonicalDocPath,
   globToRegExp,
   isScannedDoc,
   matchesAny,
@@ -107,7 +108,7 @@ export async function resolveTargetInText(
   const lang = langForPath(target.path);
   if (!lang)
     throw new Error(
-      `lockwire supports TypeScript, TSX, JavaScript, and Python source, and values in JSON and LaTeX (.tex) files — "${target.path}" is none of these`,
+      `lockwire supports TypeScript, TSX, JavaScript, and Python source, and values in JSON, CSV, TSV and LaTeX (.tex) files — "${target.path}" is none of these`,
     );
 
   const parser = await parserFor(lang);
@@ -176,6 +177,8 @@ export function findRelocationCandidate(
 export interface LinkResult {
   created: number;
   refreshed: number;
+  /** Markers whose anchor was already fresh and current: nothing was written for them. */
+  unchanged: number;
   skipped: { reason: string; target: string }[];
 }
 
@@ -223,10 +226,12 @@ export async function linkDoc(
 ): Promise<LinkResult> {
   const absDoc = resolveInsideRepo(repoRoot, docPath);
   if (!absDoc) throw new Error(outsideRepoMessage(docPath));
+  // A symlinked doc is bound under the file it points to, so naming either one gives the same anchors.
+  docPath = canonicalDocPath(repoRoot, docPath, absDoc);
   const text = await readFile(absDoc, "utf8");
   const markers = scanMarkers(text);
   const lockfile = await readLockfile(repoRoot);
-  const result: LinkResult = { created: 0, refreshed: 0, skipped: [] };
+  const result: LinkResult = { created: 0, refreshed: 0, unchanged: 0, skipped: [] };
   // Keep each line's own terminator: stamping a marker must change that one line, not rewrite every
   // CRLF in the file to LF. `parts` alternates line, terminator, line, terminator, ...
   const parts = text.split(/(\r?\n)/);
@@ -304,21 +309,21 @@ export async function linkDoc(
       continue;
     }
 
-    // Re-stamping a drifted (or orphaned-then-reappeared) anchor accepts code nobody has looked at, so
-    // it needs a human's say-so -- unless the code still matches and only the claim sentence moved.
+    // Re-stamping an anchor whose bound code moved since it was stamped accepts code nobody has looked
+    // at, so it needs a human's say-so -- whether or not a `check` has recorded the drift yet. A moved
+    // value the sentence already states is the fix itself, not unreviewed code.
     const codeDrifted =
-      existing?.tiers.some(
-        (t) =>
-          tierFingerprint(resolved.fingerprints, t) !== tierFingerprint(existing.fingerprints, t),
-      ) === true;
-    if (
-      (existing?.status === "drifted" || existing?.status === "orphaned") &&
-      codeDrifted &&
-      !opts.reviewed
-    ) {
+      existing?.tiers.some((t) => {
+        if (tierFingerprint(resolved.fingerprints, t) === tierFingerprint(existing.fingerprints, t))
+          return false;
+        if (t !== "value" || !resolved.value) return true;
+        const verdict = checkClaimAgainstValue(marker.claimText, resolved.value.raw);
+        return !(verdict.checkable && verdict.matches);
+      }) === true;
+    if (codeDrifted && !opts.reviewed) {
       result.skipped.push({
-        reason: "drifted anchor needs --reviewed to re-stamp",
-        target: marker.target.path,
+        reason: "the code changed since this claim was stamped: review it, then link --reviewed",
+        target: targetLabel,
       });
       continue;
     }
@@ -345,6 +350,26 @@ export async function linkDoc(
     const id = isNew || !marker.id ? newAnchorId() : marker.id;
     idsSeenInDoc.add(id);
     if (marker.id) idsSeenInDoc.add(marker.id);
+
+    // Nothing to re-stamp: same claim, same place, same code. Leave the anchor and the ledger alone.
+    if (
+      existing &&
+      !isNew &&
+      !retargeted &&
+      existing.status === "fresh" &&
+      existing.doc === docPath &&
+      existing.claim?.hash === marker.claimHash &&
+      existing.claim?.line === marker.claimLine &&
+      existing.tiers.join() === tiers.join() &&
+      ALL_TIERS.every(
+        (t) =>
+          tierFingerprint(existing.fingerprints, t) === tierFingerprint(resolved.fingerprints, t),
+      )
+    ) {
+      result.unchanged++;
+      continue;
+    }
+
     const anchor: Anchor = {
       id,
       doc: docPath,
@@ -521,6 +546,8 @@ export async function findUnlinkedMarkers(
   lockfile: Lockfile,
   docs: readonly string[],
   readMarkers: (doc: string) => Promise<readonly MarkerView[] | null>,
+  /** When given, a marker whose target file is missing says so instead of "not linked yet". */
+  repoRoot?: string,
 ): Promise<UnlinkedMarker[]> {
   const unlinked: UnlinkedMarker[] = [];
   for (const doc of [...docs].sort()) {
@@ -530,7 +557,16 @@ export async function findUnlinkedMarkers(
     for (const m of markers) {
       let reason: string | null = null;
       const anchor = m.id ? lockfile.anchors.find((a) => a.id === m.id) : undefined;
-      if (!m.id) reason = "not linked yet";
+      if (!m.id) {
+        const abs = repoRoot ? resolveInsideRepo(repoRoot, m.target.path) : undefined;
+        // `link` can't fix a marker that points nowhere: say what's wrong with it instead.
+        reason =
+          abs === null
+            ? `${m.target.path} is outside the repository`
+            : abs !== undefined && !existsSync(abs)
+              ? `not linked: ${m.target.path} doesn't exist`
+              : "not linked yet";
+      }
       else if (!anchor) reason = `id ${m.id} matches no anchor`;
       else if (seenIds.has(m.id)) reason = `id ${m.id} appears twice in this doc`;
       else if (anchor.doc && anchor.doc !== doc) {
@@ -1010,7 +1046,7 @@ export async function check(
   const docsToScan = onlyPaths
     ? await docsInScope(repoRoot, config, onlyPaths)
     : await discoverDocs(repoRoot, config);
-  const unlinked = await findUnlinkedMarkers(lockfile, docsToScan, markersIn);
+  const unlinked = await findUnlinkedMarkers(lockfile, docsToScan, markersIn, repoRoot);
 
   const singleHashWouldFlag = examined.filter((r) => r.singleHashWouldFlag).length;
   // The noise comparison is about code fingerprints; a claim-only flag has no single-hash counterpart.
@@ -1039,8 +1075,14 @@ export async function check(
   return { summary, results, unlinked };
 }
 
+/**
+ * Docs the config selects. A symlinked doc is skipped: it's another name for a file the walk reaches
+ * anyway (`README.md -> packages/zod/README.md`), and linking both would bind every claim twice.
+ */
 export async function discoverDocs(repoRoot: string, config: LockwireConfig): Promise<string[]> {
-  return walkFiles(repoRoot, config.exclude).filter((p) => matchesAny(p, config.docs));
+  return walkFiles(repoRoot, config.exclude, { skipSymlinks: true }).filter((p) =>
+    matchesAny(p, config.docs),
+  );
 }
 
 export async function ack(
@@ -1112,7 +1154,14 @@ export async function waive(
   actor: Actor,
 ): Promise<Anchor> {
   const expiresAt = Date.parse(expires);
-  if (!/^\d{4}-\d{2}-\d{2}/.test(expires) || Number.isNaN(expiresAt))
+  // Date.parse rolls an impossible day over (2027-02-31 is March 3rd); a waiver must say what it means.
+  const [y, m, d] = (/^(\d{4})-(\d{2})-(\d{2})/.exec(expires) ?? []).slice(1).map(Number);
+  const realDay =
+    y !== undefined &&
+    m !== undefined &&
+    d !== undefined &&
+    new Date(Date.UTC(y, m - 1, d)).toISOString().startsWith(expires.slice(0, 10));
+  if (!realDay || Number.isNaN(expiresAt))
     throw new Error(
       `invalid --expires "${expires}": use an ISO date such as 2026-12-31 (waivers must expire)`,
     );

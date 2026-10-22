@@ -43,8 +43,14 @@ export function formatText(result) {
         lines.push("Unlinked markers (no anchor backs them, so these claims are not being checked):");
         for (const u of result.unlinked)
             lines.push(`  ${u.doc}:${u.line}  ${u.target}  ${u.reason}`);
-        const docs = [...new Set(result.unlinked.map((u) => u.doc))];
-        lines.push(`Run \`lockwire link ${docs.length === 1 ? docs[0] : "<doc>"}\` to link them.`, "");
+        // `link` can fix a marker that just hasn't been linked; one whose target is missing needs editing.
+        const linkable = result.unlinked.filter((u) => !u.reason.startsWith("not linked:"));
+        const docs = [...new Set(linkable.map((u) => u.doc))];
+        if (docs.length > 0)
+            lines.push(`Run \`lockwire link ${docs.length === 1 ? docs[0] : "<doc>"}\` to link them.`);
+        if (linkable.length < result.unlinked.length)
+            lines.push("Fix the target of each marker whose file doesn't exist, then link.");
+        lines.push("");
     }
     const { summary } = result;
     lines.push(`${summary.anchors} anchor${summary.anchors === 1 ? "" : "s"} · ${summary.fresh} ok · ${summary.drifted} drifted · ${summary.orphaned} orphaned${summary.relocated > 0 ? ` · ${summary.relocated} relocated` : ""}${summary.unlinked > 0 ? ` · ${summary.unlinked} unlinked` : ""}`);

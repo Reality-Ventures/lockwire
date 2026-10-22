@@ -356,7 +356,7 @@ async function resolveLocked(repoRoot, config, id, actor, note) {
             only: (m) => m.line === taskRef.line,
             note: ledgerNote,
         });
-        if (result.created + result.refreshed === 0)
+        if (result.created + result.refreshed + result.unchanged === 0)
             return refused(result.skipped[0]?.reason ??
                 `no marker at ${task.doc}:${taskRef.line} any more: call lockwire_tasks again`);
         const lock = await readLockfile(repoRoot);
@@ -415,7 +415,7 @@ async function resolveLocked(repoRoot, config, id, actor, note) {
             only: (m) => m.line === canonical.line,
             note: ledgerNote,
         });
-        if (result.refreshed === 0) {
+        if (result.refreshed + result.unchanged === 0) {
             await undo();
             return refused(result.skipped[0]?.reason ??
                 `the marker for ${id} isn't in ${anchor.doc}: call lockwire_tasks again`);

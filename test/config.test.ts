@@ -107,12 +107,12 @@ describe.skipIf(!existsSync(CLI))("`lockwire link` with no argument links the do
     expect(await linkedDocs(dir)).toEqual(["CHANGELOG.md"]);
   });
 
-  it("running it again refreshes and leaves the files byte-for-byte alone", async () => {
+  it("running it again changes nothing and leaves the files byte-for-byte alone", async () => {
     const dir = await repo();
     cli(dir, ["link"]);
     const claude = await readFile(join(dir, "CLAUDE.md"), "utf8");
     const second = cli(dir, ["link"]);
-    expect(second.stdout).toContain("2 docs: 0 created, 2 refreshed");
+    expect(second.stdout).toContain("2 docs: 0 created, 0 refreshed, 2 unchanged");
     expect(await readFile(join(dir, "CLAUDE.md"), "utf8")).toBe(claude);
   });
 

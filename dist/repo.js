@@ -13,7 +13,7 @@ export function isScannedDoc(path, config) {
         !path.split("/").some((seg) => ALWAYS_SKIP.has(seg)));
 }
 /** Like {@link walkFiles}, but stops at `deadline` (a `Date.now()` timestamp) and says so. */
-export function walkFilesWithin(repoRoot, exclude, deadline) {
+export function walkFilesWithin(repoRoot, exclude, deadline, opts = {}) {
     const files = [];
     let complete = true;
     function walk(dir) {
@@ -28,6 +28,8 @@ export function walkFilesWithin(repoRoot, exclude, deadline) {
             const rel = toRepoRelative(repoRoot, abs);
             if (isSkippedEntry(entry.name, rel, exclude))
                 continue;
+            if (opts.skipSymlinks && entry.isSymbolicLink())
+                continue;
             if (entry.isDirectory())
                 walk(abs);
             else
@@ -38,8 +40,8 @@ export function walkFilesWithin(repoRoot, exclude, deadline) {
     return { files, complete };
 }
 /** Recursively lists repo-relative, posix paths, skipping `.git`/`node_modules`/`.lockwire` and anything matching `exclude`. */
-export function walkFiles(repoRoot, exclude = []) {
-    return walkFilesWithin(repoRoot, exclude, Number.POSITIVE_INFINITY).files;
+export function walkFiles(repoRoot, exclude = [], opts = {}) {
+    return walkFilesWithin(repoRoot, exclude, Number.POSITIVE_INFINITY, opts).files;
 }
 /**
  * Whether this repository has opted into lockwire: it has a `lockwire.lock` or a `.lockwire/config.json`.
@@ -82,6 +84,23 @@ export function resolveInsideRepo(repoRoot, rel) {
         // keep the lexical root
     }
     return within(realRoot, real) ? abs : null;
+}
+/**
+ * The repo-relative path a doc is stored under: the file a symlinked doc points to, so `README.md ->
+ * packages/zod/README.md` and the real path name the same doc. `absDoc` is the doc's
+ * {@link resolveInsideRepo} result, so the link's target is already known to be inside the repo.
+ */
+export function canonicalDocPath(repoRoot, docPath, absDoc) {
+    let real;
+    let realRoot;
+    try {
+        real = realpathSync(absDoc);
+        realRoot = realpathSync(resolve(repoRoot));
+    }
+    catch {
+        return docPath;
+    }
+    return real === absDoc ? docPath : toRepoRelative(realRoot, real);
 }
 export const outsideRepoMessage = (path) => `"${path}" is outside the repository; lockwire only reads files inside it`;
 /** Windows editors (and PowerShell's `Out-File`) prepend a UTF-8 BOM that `JSON.parse` rejects. */

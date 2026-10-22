@@ -40,6 +40,8 @@ export declare function findRelocationCandidate(symbols: FileSymbols, missingSig
 export interface LinkResult {
     created: number;
     refreshed: number;
+    /** Markers whose anchor was already fresh and current: nothing was written for them. */
+    unchanged: number;
     skipped: {
         reason: string;
         target: string;
@@ -129,7 +131,9 @@ export type MarkerView = Pick<DocMarker, "id" | "target" | "line" | "claimExcerp
  * id that belongs to the marker in another doc (a copy-paste), or one used twice in a doc. Until
  * `lockwire link` runs, such a claim isn't being checked at all.
  */
-export declare function findUnlinkedMarkers(lockfile: Lockfile, docs: readonly string[], readMarkers: (doc: string) => Promise<readonly MarkerView[] | null>): Promise<UnlinkedMarker[]>;
+export declare function findUnlinkedMarkers(lockfile: Lockfile, docs: readonly string[], readMarkers: (doc: string) => Promise<readonly MarkerView[] | null>, 
+/** When given, a marker whose target file is missing says so instead of "not linked yet". */
+repoRoot?: string): Promise<UnlinkedMarker[]>;
 /**
  * A holder a long-lived caller keeps between calls so the doc index lives in memory and each call
  * only re-validates it.
@@ -163,6 +167,10 @@ export declare function check(repoRoot: string, config: LockwireConfig, onlyPath
     write?: boolean;
     actor?: Actor;
 }): Promise<CheckResult>;
+/**
+ * Docs the config selects. A symlinked doc is skipped: it's another name for a file the walk reaches
+ * anyway (`README.md -> packages/zod/README.md`), and linking both would bind every claim twice.
+ */
 export declare function discoverDocs(repoRoot: string, config: LockwireConfig): Promise<string[]>;
 export declare function ack(repoRoot: string, anchorId: string, resolution: "updated" | "superseded" | "false-positive", note: string | undefined, actor: Actor, config: LockwireConfig): Promise<Anchor>;
 export declare function waive(repoRoot: string, anchorId: string, reason: string, expires: string, actor: Actor): Promise<Anchor>;

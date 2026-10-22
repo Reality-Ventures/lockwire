@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { stripBom } from "./repo.js";
 const LOCKFILE_NAME = "lockwire.lock";
 export function lockfilePath(repoRoot) {
@@ -47,7 +47,15 @@ export function newAnchorId() {
     return id;
 }
 /** Write via a temp file and a rename, so a concurrent reader sees the old file or the new one, never half. */
-export async function writeFileAtomic(path, text) {
+export async function writeFileAtomic(linkOrPath, text) {
+    // Write through a symlink: renaming over the link itself would replace it with a regular file.
+    let path = linkOrPath;
+    try {
+        path = await realpath(linkOrPath);
+    }
+    catch {
+        // doesn't exist yet: create it where asked
+    }
     const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
     try {
         await writeFile(tmp, text, "utf8");

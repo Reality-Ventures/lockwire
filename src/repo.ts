@@ -30,6 +30,7 @@ export function walkFilesWithin(
   repoRoot: string,
   exclude: readonly string[],
   deadline: number,
+  opts: { skipSymlinks?: boolean } = {},
 ): WalkResult {
   const files: string[] = [];
   let complete = true;
@@ -43,6 +44,7 @@ export function walkFilesWithin(
       const abs = join(dir, entry.name);
       const rel = toRepoRelative(repoRoot, abs);
       if (isSkippedEntry(entry.name, rel, exclude)) continue;
+      if (opts.skipSymlinks && entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) walk(abs);
       else files.push(rel);
     }
@@ -52,8 +54,12 @@ export function walkFilesWithin(
 }
 
 /** Recursively lists repo-relative, posix paths, skipping `.git`/`node_modules`/`.lockwire` and anything matching `exclude`. */
-export function walkFiles(repoRoot: string, exclude: readonly string[] = []): string[] {
-  return walkFilesWithin(repoRoot, exclude, Number.POSITIVE_INFINITY).files;
+export function walkFiles(
+  repoRoot: string,
+  exclude: readonly string[] = [],
+  opts: { skipSymlinks?: boolean } = {},
+): string[] {
+  return walkFilesWithin(repoRoot, exclude, Number.POSITIVE_INFINITY, opts).files;
 }
 
 /**
@@ -97,6 +103,23 @@ export function resolveInsideRepo(repoRoot: string, rel: string): string | null 
     // keep the lexical root
   }
   return within(realRoot, real) ? abs : null;
+}
+
+/**
+ * The repo-relative path a doc is stored under: the file a symlinked doc points to, so `README.md ->
+ * packages/zod/README.md` and the real path name the same doc. `absDoc` is the doc's
+ * {@link resolveInsideRepo} result, so the link's target is already known to be inside the repo.
+ */
+export function canonicalDocPath(repoRoot: string, docPath: string, absDoc: string): string {
+  let real: string;
+  let realRoot: string;
+  try {
+    real = realpathSync(absDoc);
+    realRoot = realpathSync(resolve(repoRoot));
+  } catch {
+    return docPath;
+  }
+  return real === absDoc ? docPath : toRepoRelative(realRoot, real);
 }
 
 export const outsideRepoMessage = (path: string) =>

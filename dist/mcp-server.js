@@ -132,13 +132,11 @@ export function createServer(repoRoot, opts = {}) {
         title: "Create or refresh an anchor",
         description: "Scan a doc for lockwire markers and stamp fresh fingerprints.",
         inputSchema: { doc: z.string(), reviewed: z.boolean().optional() },
-        // linkDoc() unconditionally appends an anchor.created/anchor.resolved ledger event per
-        // marker on every call, by design -- the ledger records every explicit link action taken,
-        // not just net state changes -- so this is NOT idempotent.
+        // A second call with nothing changed in between stamps nothing and appends no ledger event.
         annotations: {
             readOnlyHint: false,
             destructiveHint: false,
-            idempotentHint: false,
+            idempotentHint: true,
             openWorldHint: false,
         },
     }, async ({ doc, reviewed }) => text(await withRepoLock(repoRoot, async () => linkDoc(repoRoot, toRepoPath(repoRoot, doc, repoRoot), await readConfig(repoRoot), agentActor(), reviewed === undefined ? {} : { reviewed }))));

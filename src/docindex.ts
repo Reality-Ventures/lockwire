@@ -265,7 +265,7 @@ export async function loadDocIndex(
       const child = joinRel(rel, e.name);
       if (isSkippedEntry(e.name, child, config.exclude)) continue;
       if (e.isDirectory()) dirs.push(child);
-      else if (isScannedDoc(child, config)) docs.push(child);
+      else if (!e.isSymbolicLink() && isScannedDoc(child, config)) docs.push(child);
     }
     return { dirs, docs };
   }

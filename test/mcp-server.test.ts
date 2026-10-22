@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { beforeEach, describe, expect, it } from "vitest";
 import { linkDoc, status } from "../src/actions.js";
+import { readLedger } from "../src/ledger.js";
 import { createServer } from "../src/mcp-server.js";
 import { DEFAULT_CONFIG } from "../src/types.js";
 
@@ -280,14 +281,16 @@ describe("MCP server tools", () => {
     expect(events.map((e: { event: string }) => e.event)).toContain("anchor.created");
   });
 
-  it("lockwire_link re-stamps the doc and appends a ledger event", async () => {
+  it("lockwire_link on an already-fresh doc changes nothing and appends no ledger event", async () => {
     const client = await connectedClient(repo);
+    const before = (await readLedger(repo)).length;
     const result = await client.callTool({
       name: "lockwire_link",
       arguments: { doc: "CLAUDE.md", reviewed: true },
     });
     const parsed = JSON.parse(firstText(result as never));
-    expect(parsed.refreshed).toBe(1);
+    expect(parsed).toMatchObject({ created: 0, refreshed: 0, unchanged: 1 });
+    expect((await readLedger(repo)).length).toBe(before);
   });
 
   it("lockwire_ack marks the anchor resolved and logs it", async () => {

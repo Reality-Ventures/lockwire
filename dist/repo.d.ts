@@ -10,9 +10,13 @@ export interface WalkResult {
     complete: boolean;
 }
 /** Like {@link walkFiles}, but stops at `deadline` (a `Date.now()` timestamp) and says so. */
-export declare function walkFilesWithin(repoRoot: string, exclude: readonly string[], deadline: number): WalkResult;
+export declare function walkFilesWithin(repoRoot: string, exclude: readonly string[], deadline: number, opts?: {
+    skipSymlinks?: boolean;
+}): WalkResult;
 /** Recursively lists repo-relative, posix paths, skipping `.git`/`node_modules`/`.lockwire` and anything matching `exclude`. */
-export declare function walkFiles(repoRoot: string, exclude?: readonly string[]): string[];
+export declare function walkFiles(repoRoot: string, exclude?: readonly string[], opts?: {
+    skipSymlinks?: boolean;
+}): string[];
 /**
  * Whether this repository has opted into lockwire: it has a `lockwire.lock` or a `.lockwire/config.json`.
  * The editing hooks run in every repo the user touches, so they must be inert (no scanning, no files
@@ -26,6 +30,12 @@ export declare function isLockwireRepo(repoRoot: string): boolean;
  * A path that doesn't exist yet is returned as is: there's nothing to read.
  */
 export declare function resolveInsideRepo(repoRoot: string, rel: string): string | null;
+/**
+ * The repo-relative path a doc is stored under: the file a symlinked doc points to, so `README.md ->
+ * packages/zod/README.md` and the real path name the same doc. `absDoc` is the doc's
+ * {@link resolveInsideRepo} result, so the link's target is already known to be inside the repo.
+ */
+export declare function canonicalDocPath(repoRoot: string, docPath: string, absDoc: string): string;
 export declare const outsideRepoMessage: (path: string) => string;
 /** Windows editors (and PowerShell's `Out-File`) prepend a UTF-8 BOM that `JSON.parse` rejects. */
 export declare function stripBom(text: string): string;

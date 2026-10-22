@@ -61,10 +61,30 @@ function splitTarget(target) {
         ? [target, undefined]
         : [target.slice(0, hash), target.slice(hash + 1) || undefined];
 }
+/** The CLI twin of each MCP tool that shared messages name. */
+const CLI_TWIN = {
+    lockwire_tasks: "lockwire tasks",
+    lockwire_task_context: "lockwire task <id>",
+    lockwire_resolve: "lockwire resolve <id>",
+    lockwire_ack: "lockwire ack <id>",
+};
+/** Task guidance and refusals are written for agents (MCP tool names); a CLI user gets the commands. */
+function forCli(message, id) {
+    const twin = (tool) => {
+        const cmd = CLI_TWIN[tool] ?? tool;
+        return id ? cmd.replace("<id>", id) : cmd;
+    };
+    return message
+        .replace(/\b(?:call|Read) (lockwire_\w+)(?: with resolution ([\w-]+))?/g, (_, tool, resolution) => `run \`${twin(tool)}${resolution ? ` --resolution ${resolution}` : ""}\``)
+        .replace(/\blockwire_(?:tasks|task_context|resolve|ack)\b/g, (tool) => `\`${twin(tool)}\``);
+}
 function printLinkResult(doc, result) {
-    console.log(`${doc}: ${result.created} created, ${result.refreshed} refreshed${result.skipped.length ? `, ${result.skipped.length} skipped` : ""}`);
+    console.log(`${doc}: ${result.created} created, ${result.refreshed} refreshed${result.unchanged ? `, ${result.unchanged} unchanged` : ""}${result.skipped.length ? `, ${result.skipped.length} skipped` : ""}`);
     for (const s of result.skipped)
         console.log(`  skipped ${s.target}: ${s.reason}`);
+    // A marker left unlinked is unfinished work, so a script running `link` must be able to tell.
+    if (result.skipped.length > 0)
+        process.exitCode = 1;
 }
 async function main() {
     const [, , cmd, ...rest] = process.argv;
@@ -100,7 +120,7 @@ async function main() {
             const [docArg, target] = positional;
             if (!docArg) {
                 // No doc named: link every doc the config selects (`docs` / `exclude`) that has markers.
-                const totals = { docs: 0, created: 0, refreshed: 0, skipped: 0 };
+                const totals = { docs: 0, created: 0, refreshed: 0, unchanged: 0, skipped: 0 };
                 for (const doc of await discoverDocs(repoRoot, config)) {
                     const abs = resolveInsideRepo(repoRoot, doc);
                     if (!abs || scanMarkers(await readFile(abs, "utf8")).length === 0)
@@ -110,12 +130,13 @@ async function main() {
                     totals.docs++;
                     totals.created += result.created;
                     totals.refreshed += result.refreshed;
+                    totals.unchanged += result.unchanged;
                     totals.skipped += result.skipped.length;
                 }
                 if (totals.docs === 0)
                     console.log(`no docs with lockwire markers found (docs: ${config.docs.join(", ")}; exclude: ${config.exclude.join(", ")})`);
                 else if (totals.docs > 1)
-                    console.log(`${totals.docs} docs: ${totals.created} created, ${totals.refreshed} refreshed${totals.skipped ? `, ${totals.skipped} skipped` : ""}`);
+                    console.log(`${totals.docs} docs: ${totals.created} created, ${totals.refreshed} refreshed${totals.unchanged ? `, ${totals.unchanged} unchanged` : ""}${totals.skipped ? `, ${totals.skipped} skipped` : ""}`);
                 break;
             }
             const doc = toRepoPath(repoRoot, docArg);
@@ -156,6 +177,16 @@ async function main() {
                     ? positional.map((p) => toRepoPath(repoRoot, p))
                     : undefined;
             const result = await withRepoLock(repoRoot, () => check(repoRoot, config, changedOnly, { write: !flags["no-write"], actor }));
+            // A mistyped path would otherwise check nothing and pass.
+            if (positional.length > 0 && changedOnly) {
+                const missing = changedOnly.filter((p) => {
+                    const abs = resolveInsideRepo(repoRoot, p);
+                    return !abs || !existsSync(abs);
+                });
+                const examined = result.results.some((r) => !r.skipped) || result.unlinked.length > 0;
+                if (missing.length > 0 && !examined)
+                    throw new Error(`nothing to check: ${missing.join(", ")} ${missing.length === 1 ? "doesn't" : "don't"} exist and no anchor names ${missing.length === 1 ? "it" : "them"}`);
+            }
             const fmt = typeof flags.format === "string" ? flags.format : "text";
             const out = fmt === "json"
                 ? formatJson(result, null)
@@ -192,6 +223,8 @@ async function main() {
                 throw new Error("usage: lockwire refs <path>[#symbol]");
             const [rawPath, symbol] = splitTarget(target);
             const anchors = await refs(repoRoot, toRepoPath(repoRoot, rawPath ?? ""), symbol);
+            if (anchors.length === 0)
+                console.log(`no anchors reference ${target}`);
             for (const a of anchors)
                 console.log(`${a.doc ?? "(lockfile-only)"}:${a.claim?.line ?? "-"}  ${a.id}`);
             break;
@@ -201,6 +234,10 @@ async function main() {
             if (!ref)
                 throw new Error("usage: lockwire history <anchor-id | path#symbol | doc.md>");
             const { events } = await history(repoRoot, ref);
+            if (events.length === 0) {
+                console.error(`no history for ${ref}: no anchor id, path#symbol or doc in the ledger matches it`);
+                process.exitCode = 1;
+            }
             for (const e of events)
                 console.log(`${e.ts}  ${e.event.padEnd(20)} ${e.tier ?? ""} ${e.note ?? ""}`.trimEnd());
             break;
@@ -236,7 +273,7 @@ async function main() {
         case "ledger": {
             if (positional[0] === "verify") {
                 const result = await verifyLedger(repoRoot);
-                console.log(`${result.total} events · ${result.ok ? "all hashes verify" : `${result.badLines.length} bad line(s): ${result.badLines.join(",")}`}`);
+                console.log(`${result.total} events · ${result.ok ? "all hashes verify" : `${result.badLines.length} bad line(s): ${result.badLines.map((n) => n + 1).join(",")}`}`);
                 console.log(`root: ${result.root}`);
                 process.exitCode = result.ok ? 0 : 1;
             }
@@ -334,7 +371,7 @@ async function main() {
             show("now", ctx.now);
             console.log("\nto resolve:");
             for (const r of task.resolutions)
-                console.log(`  - ${r}`);
+                console.log(`  - ${forCli(r, task.id)}`);
             break;
         }
         case "resolve": {
@@ -343,7 +380,7 @@ async function main() {
                 throw new Error('usage: lockwire resolve <id> [--note "what you checked"]');
             const outcome = await resolveTask(repoRoot, await readConfig(repoRoot), id, actor, typeof flags.note === "string" ? flags.note : undefined);
             console.log(outcome.status === "refused"
-                ? `refused ${id}: ${outcome.reason}`
+                ? `refused ${id}: ${forCli(outcome.reason ?? "", id)}`
                 : `${outcome.status} ${id}${outcome.anchorId && outcome.anchorId !== id ? ` (now anchor ${outcome.anchorId})` : ""}`);
             if (outcome.remaining.length > 0)
                 console.log(`${outcome.remaining.length} more on the same doc: ${outcome.remaining.map((t) => t.id).join(", ")}`);
@@ -376,7 +413,7 @@ async function main() {
     }
 }
 main().catch((err) => {
-    console.error(err instanceof Error ? err.message : String(err));
+    console.error(forCli(err instanceof Error ? err.message : String(err)));
     process.exitCode = 1;
 });
 //# sourceMappingURL=cli.js.map
