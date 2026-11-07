@@ -14,6 +14,8 @@ export function describeDrift(r) {
     const moved = describeMove(r.moved);
     if (moved)
         parts.push(moved);
+    if (r.similar)
+        parts.push(`${label(r.similar)} has the same signature`);
     return parts.join(", ");
 }
 const label = (t) => `${t.path}${t.symbol ? `#${t.symbol}` : ""}`;
@@ -75,6 +77,9 @@ export function formatText(result) {
             lines.push("Where the code is in several places, choose one: `lockwire repoint <id> --to <path#symbol>`.");
         lines.push("");
     }
+    if (result.results.some((r) => !r.skipped && r.similar)) {
+        lines.push("Where a symbol is gone and another has the same signature: if it was renamed, `lockwire repoint <id> --to <path#symbol>` re-points the claim.", "");
+    }
     const { summary } = result;
     lines.push(`${summary.anchors} anchor${summary.anchors === 1 ? "" : "s"} · ${summary.fresh} ok · ${summary.drifted} drifted · ${summary.orphaned} orphaned${summary.relocated > 0 ? ` · ${summary.relocated} relocated` : ""}${summary.unlinked > 0 ? ` · ${summary.unlinked} unlinked` : ""}`);
     lines.push(`single-hash would flag ${summary.noise.singleHashWouldFlag} · lockwire flagged ${summary.noise.tieredFlagged} · noise −${summary.noise.reductionPercent}%`);
@@ -99,6 +104,7 @@ export function formatJson(result, repo) {
             claimChanged: r.claimChanged ?? false,
             value: r.value ?? null,
             moved: r.moved ?? null,
+            similar: r.similar ?? null,
             definedAt: r.definedAt ?? null,
             excerpt: r.anchor.claim?.excerpt ?? null,
         })),

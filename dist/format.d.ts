@@ -3,7 +3,7 @@ import type { AnchorCheckResult, CheckResult } from "./actions.js";
  * What moved, for a one-line report: `sig`, `claim`, and for a value anchor the value itself —
  * `value: 0.18 -> 0.19`, or `claim says 0.18, value is 0.19` when the sentence no longer holds.
  */
-export declare function describeDrift(r: Pick<AnchorCheckResult, "driftedTiers" | "claimChanged" | "value" | "moved">): string;
+export declare function describeDrift(r: Pick<AnchorCheckResult, "driftedTiers" | "claimChanged" | "value" | "moved" | "similar">): string;
 /** `moved to src/new.ts#foo`, or where its code was found when lockwire can't tell which place is the claim's. */
 export declare function describeMove(moved: AnchorCheckResult["moved"]): string;
 export declare function formatText(result: CheckResult): string;

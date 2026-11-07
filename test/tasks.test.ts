@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
-import { linkDoc } from "../src/actions.js";
+import { linkDoc, repoint } from "../src/actions.js";
 import { readLedger, verifyLedger } from "../src/ledger.js";
 import { createServer } from "../src/mcp-server.js";
 import { listTasks, resolveTask, type Task, taskContext } from "../src/tasks.js";
@@ -477,12 +477,23 @@ describe("work-queue regressions (each from an adversarial finding)", () => {
     expect(await listTasks(dir, DEFAULT_CONFIG)).toEqual([]);
   });
 
-  it("a rename plus a body change: the context shows the renamed code, and resolving retargets the marker", async () => {
+  it("a rename plus a body change: lockwire names the same-signature symbol, repoint follows it, and resolving keeps the marker on it", async () => {
     const dir = await repo({ "src/a.ts": FN("alpha"), "CLAUDE.md": `# A\n\n${marker("src/a.ts#alpha", " sig,body")}\nalpha adds one.\n` });
     await linkDoc(dir, "CLAUDE.md", DEFAULT_CONFIG, human);
     await writeFile(join(dir, "src/a.ts"), FN("alpha2", "x + 2"), "utf8");
+    // Nothing but the signature ties alpha2 to alpha, which is also what a look-alike neighbour looks
+    // like, so lockwire doesn't re-bind the claim: it says what it found.
+    const [gone] = await listTasks(dir, DEFAULT_CONFIG);
+    expect(gone).toMatchObject({ kind: "target-missing", target: "src/a.ts#alpha" });
+    expect(gone?.resolutions[0]).toMatch(/src\/a\.ts#alpha2 has the same signature.*lockwire_repoint/);
+    const out = await repoint(dir, DEFAULT_CONFIG, human, {
+      ids: [gone!.id],
+      to: { path: "src/a.ts", symbol: "alpha2" },
+    });
+    expect(out.repointed[0]).toMatchObject({ status: "drifted", driftedTiers: ["body"], markerUpdated: true });
+
     const [t] = await listTasks(dir, DEFAULT_CONFIG);
-    expect(t?.target).toBe("src/a.ts#alpha2");
+    expect(t).toMatchObject({ kind: "code-changed", target: "src/a.ts#alpha2" });
     const ctx = await taskContext(dir, DEFAULT_CONFIG, t!.id);
     expect(ctx.now.source).toContain("alpha2");
     await writeFile(join(dir, "CLAUDE.md"), (await readFile(join(dir, "CLAUDE.md"), "utf8")).replace("alpha adds one.", "alpha2 adds two."), "utf8");

@@ -5,6 +5,9 @@ export interface MoveHint {
     /** Every place it was found (more than one means lockwire can't tell which is the claim's). */
     candidates: AnchorTarget[];
 }
+export declare const isTrivialBody: (bodyFingerprint: string) => boolean;
+/** The `deps` of a symbol that calls nothing: likewise no evidence. */
+export declare const NO_DEPS: string;
 /**
  * A signature's fingerprints with the `export` modifier as written, removed and added: moving a
  * private helper into a module of its own usually means exporting it, and that is part of the move,
@@ -13,9 +16,10 @@ export interface MoveHint {
 export declare function sigFingerprints(sig: string): Set<string>;
 export type SymbolsOf = (path: string, content: string, version: number) => Promise<FileSymbols | null>;
 /**
- * The repository's source files for one run: read once into an index of the identifiers each one
- * contains (not their text, which in a big repository is more than is worth holding), and parsed on
- * demand, only where the name being looked for appears.
+ * The repository's source files for one run: read once into an index of the names each one declares
+ * (not their text, which in a big repository is more than is worth holding), and parsed on demand,
+ * only the files that declare the name being looked for. A name every file uses (`get`) is declared
+ * in far fewer.
  */
 export declare class SourceIndex {
     private readonly repoRoot;
@@ -32,10 +36,14 @@ export declare class SourceIndex {
     private load;
     private read;
     private symbolsIn;
+    /** Whether `s`'s file already held this code, under the same name, at `commit`. */
+    private existedAt;
     /**
      * Where `anchor`'s symbol, as stamped, lives now outside `anchor.target.path`, or null when nowhere
      * (or when the search ran out of time before it could be sure).
      */
-    findMove(anchor: Anchor, version: number): Promise<MoveHint | null>;
+    findMove(anchor: Anchor, version: number, 
+    /** `path#symbol`s other claims are bound to: that code is theirs, not where this claim's went. */
+    taken?: ReadonlySet<string>): Promise<MoveHint | null>;
 }
 //# sourceMappingURL=moves.d.ts.map

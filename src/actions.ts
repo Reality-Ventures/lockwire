@@ -29,7 +29,7 @@ import {
   scanMarkers,
   stampMarkerLine,
 } from "./markers.js";
-import { type MoveHint, SourceIndex, sigFingerprints } from "./moves.js";
+import { isTrivialBody, type MoveHint, NO_DEPS, SourceIndex, sigFingerprints } from "./moves.js";
 import { extractReExports, NO_REEXPORTS, type ReExports, resolveModule } from "./reexports.js";
 import {
   canonicalDocPath,
@@ -358,7 +358,9 @@ export function findRelocationCandidate(
   /**
    * The vanished symbol's stamped body and deps. When given, a candidate must also match one of them:
    * a rename keeps the implementation, while a deleted function's look-alike neighbour (same
-   * parameters, different code) is not where its claim went.
+   * parameters, different code) is not where its claim went. An empty body or no calls at all is no
+   * evidence: any two functions with the same parameters would "match" on it (`findPosX` and
+   * `findPosY`, both calling nothing).
    */
   stamped?: Pick<Fingerprints, "body" | "deps">,
 ): string | null {
@@ -373,8 +375,8 @@ export function findRelocationCandidate(
     if (fingerprint(sig) !== missingSigFp) continue;
     if (
       stamped &&
-      fingerprint(symbol.bodyNormalized) !== stamped.body &&
-      fingerprintSet(symbol.deps) !== stamped.deps
+      !(!isTrivialBody(stamped.body) && fingerprint(symbol.bodyNormalized) === stamped.body) &&
+      !(stamped.deps !== NO_DEPS && fingerprintSet(symbol.deps) === stamped.deps)
     )
       continue;
     candidates.push(path);
@@ -731,6 +733,12 @@ export interface AnchorCheckResult {
    * whose code changed where it was. `lockwire repoint` re-points the claim to `to`.
    */
   moved?: MoveHint;
+  /**
+   * On an orphaned anchor: the one other symbol in the file with the same signature, when nothing
+   * else ties it to the missing one (a renamed function whose body also changed looks just like a
+   * look-alike neighbour). Not acted on; `lockwire repoint <id> --to` re-points the claim to it.
+   */
+  similar?: AnchorTarget;
   /** Where the symbol is really defined, when the target's file only re-exports it. */
   definedAt?: AnchorTarget;
   singleHashWouldFlag: boolean; // any of the four tiers changed, regardless of binding
@@ -972,6 +980,11 @@ export async function check(
   let relocatedCount = 0;
   const markersIn = markerReader(repoRoot);
   const moveSearchMs = opts.moveSearchMs ?? Number.POSITIVE_INFINITY;
+  const boundTargets = new Set(
+    lockfile.anchors.flatMap((a) =>
+      a.target.symbol && a.status !== "superseded" ? [`${a.target.path}#${a.target.symbol}`] : [],
+    ),
+  );
   let sources: SourceIndex | undefined;
   /** Where an anchor's code as stamped lives now, if it moved to another file. */
   const movedOf = async (a: Anchor): Promise<{ moved?: MoveHint }> => {
@@ -982,7 +995,7 @@ export async function check(
       (path, content, version) => symbolsOfSource(path, content, config, version),
       Date.now() + moveSearchMs,
     );
-    const hint = await sources.findMove(a, versionOf(a));
+    const hint = await sources.findMove(a, versionOf(a), boundTargets);
     return hint ? { moved: hint } : {};
   };
 
@@ -1118,13 +1131,20 @@ export async function check(
             anchor.fingerprints,
           )
         : null;
-      if (relocatedTo) {
-        const reResolved = await resolveTarget(
-          repoRoot,
-          { path: anchor.target.path, symbol: relocatedTo },
-          config,
-          versionOf(anchor),
-        );
+      const reResolved = relocatedTo
+        ? await resolveTarget(
+            repoRoot,
+            { path: anchor.target.path, symbol: relocatedTo },
+            config,
+            versionOf(anchor),
+          )
+        : null;
+      // A candidate that matched only on the calls it makes (the body differs) is a guess: if the
+      // symbol's code as stamped lives in another file, that is where the claim went.
+      const keptBody =
+        reResolved && tierFingerprint(reResolved.fingerprints, "body") === anchor.fingerprints.body;
+      const movedElsewhere = relocatedTo && !keptBody ? await movedOf(anchor) : {};
+      if (relocatedTo && !movedElsewhere.moved?.to) {
         const target = { path: anchor.target.path, symbol: relocatedTo };
         // A rename must not launder other changes: `sig` is expected to differ (it carries the
         // name, and the candidate already matched on it), but any other bound tier that moved is
@@ -1192,11 +1212,28 @@ export async function check(
             note: "symbol not found",
           });
         }
+        const moved = await movedOf(anchor);
+        const sameSignature =
+          !moved.moved?.to && resolved.symbols
+            ? findRelocationCandidate(
+                resolved.symbols,
+                anchor.fingerprints.sig,
+                anchor.target.symbol.slice(anchor.target.symbol.lastIndexOf(".") + 1),
+                new Set(
+                  lockfile.anchors
+                    .filter((a) => a.id !== anchor.id && a.target.path === anchor.target.path)
+                    .flatMap((a) => (a.target.symbol ? [a.target.symbol] : [])),
+                ),
+              )
+            : null;
         results.push({
           anchor: orphaned,
           status: "orphaned",
           driftedTiers: [],
-          ...(await movedOf(anchor)),
+          ...moved,
+          ...(sameSignature
+            ? { similar: { path: anchor.target.path, symbol: sameSignature } }
+            : {}),
           singleHashWouldFlag: true,
         });
       }
@@ -1336,6 +1373,23 @@ export async function check(
   // rooted at a parent folder of the real repo).
   if (write && (lockfile.anchors.length > 0 || existsSync(lockfilePath(repoRoot))))
     await writeLockfile(repoRoot, current);
+
+  // Claims from different places can't all have moved to the same one: identical code in two files
+  // (a copy, a twin that was already there) would otherwise make each look like the other's move.
+  // None gets a new home then; the places stay listed so a person can choose.
+  const origins = new Map<string, Set<string>>();
+  for (const r of results) {
+    const to = r.moved?.to;
+    if (!to || !r.anchor.target.symbol) continue;
+    const key = `${to.path}#${to.symbol}`;
+    const from = `${r.anchor.target.path}#${r.anchor.target.symbol}`;
+    origins.set(key, (origins.get(key) ?? new Set()).add(from));
+  }
+  for (const r of results) {
+    const to = r.moved?.to;
+    if (r.moved && to && (origins.get(`${to.path}#${to.symbol}`)?.size ?? 0) > 1)
+      r.moved = { candidates: r.moved.candidates };
+  }
 
   // Anchors outside a scoped run weren't examined: they stay in `results` (callers like the hooks
   // look anchors up there) but must not count towards the summary or the exit code.

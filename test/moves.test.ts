@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -491,5 +492,210 @@ describe("moves: the edges", () => {
     expect(ctx.now.note).toBe(
       "defined in src/retry/delay.ts#retryDelay, re-exported from src/net.ts",
     );
+  });
+});
+
+describe("found by stressing real repositories", () => {
+  const doc = (target: string, tiers = "sig,body") =>
+    `<!-- lockwire ${target} ${tiers} -->\nA claim about ${target}.\n`;
+  const checkOne = async (repo: string) =>
+    (await check(repo, DEFAULT_CONFIG, undefined, { write: false })).results;
+
+  it("two functions that call nothing aren't each other's rename (django's findPosX and findPosY)", async () => {
+    const both = `function findPosX(obj) {
+  let left = 0;
+  while (obj.offsetParent) { left += obj.offsetLeft; obj = obj.offsetParent; }
+  return left;
+}
+
+function findPosY(obj) {
+  let top = 0;
+  while (obj.offsetParent) { top += obj.offsetTop; obj = obj.offsetParent; }
+  return top;
+}
+`;
+    const repo = await repoWith({ "core.js": both, "A.md": doc("core.js#findPosX") });
+    await linkDoc(repo, "A.md", DEFAULT_CONFIG, actor);
+    const x = both.slice(0, both.indexOf("function findPosY"));
+    await put(repo, { "core.js": both.slice(x.length), "moved.js": x });
+    const [r] = await checkOne(repo);
+    expect(r?.status).toBe("orphaned");
+    expect(r?.anchor.target.symbol).toBe("findPosX");
+    expect(r?.moved?.to).toEqual({ path: "moved.js", symbol: "findPosX" });
+
+    // Deleted outright, with nowhere to have gone: orphaned, not handed to its look-alike.
+    await rm(join(repo, "moved.js"));
+    const [gone] = await checkOne(repo);
+    expect(gone?.status).toBe("orphaned");
+    expect(gone?.anchor.target.symbol).toBe("findPosX");
+    expect(gone?.moved).toBeUndefined();
+  });
+
+  it("an empty body is no evidence of a rename: a deleted stub doesn't hand its claim to another stub", async () => {
+    const repo = await repoWith({
+      "a.ts": "export function a(x: number): void {}\nexport function b(x: number): void {}\n",
+      "A.md": doc("a.ts#a", "sig"),
+    });
+    await linkDoc(repo, "A.md", DEFAULT_CONFIG, actor);
+    await put(repo, { "a.ts": "export function b(x: number): void {}\n" });
+    const [r] = await checkOne(repo);
+    expect(r).toMatchObject({ status: "orphaned" });
+    expect(r?.anchor.target.symbol).toBe("a");
+  });
+
+  it("a same-file look-alike that only makes the same calls yields to the code's real new home", async () => {
+    const both = `export function leftTax(x: number): number {
+  return Math.round(x * 1.2);
+}
+
+export function rightTax(x: number): number {
+  return Math.round(x * 1.5);
+}
+`;
+    const repo = await repoWith({ "tax.ts": both, "A.md": doc("tax.ts#leftTax") });
+    await linkDoc(repo, "A.md", DEFAULT_CONFIG, actor);
+    const left = both.slice(0, both.indexOf("export function rightTax"));
+    await put(repo, { "tax.ts": both.slice(left.length), "left.ts": left });
+    const [r] = await checkOne(repo);
+    expect(r?.status).toBe("orphaned");
+    expect(r?.anchor.target.symbol).toBe("leftTax");
+    expect(r?.moved?.to).toEqual({ path: "left.ts", symbol: "leftTax" });
+  });
+
+  it("a twin that was already in another file when the claim was stamped isn't where the code went", async () => {
+    const f = "export function withChecks(x: number): number {\n  return x * 2;\n}\n";
+    const repo = await repoWith({ "a.ts": f, "b.ts": f, "A.md": doc("a.ts#withChecks") });
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], {
+        cwd: repo,
+        stdio: "ignore",
+      });
+    git("init", "-q");
+    git("add", "-A");
+    git("commit", "-q", "-m", "init");
+    await linkDoc(repo, "A.md", DEFAULT_CONFIG, actor);
+    expect((await readLockfile(repo)).anchors[0]?.linked.commit).toMatch(/^[0-9a-f]{7,40}$/);
+
+    // Deleted outright: b.ts's copy was always there, so nothing moved.
+    await put(repo, { "a.ts": "export const x = 1;\n" });
+    const [deleted] = await checkOne(repo);
+    expect(deleted?.status).toBe("orphaned");
+    expect(deleted?.moved).toBeUndefined();
+
+    // Moved to a new file: that is where it went, with the old twin left out of the question.
+    await put(repo, { "c.ts": f });
+    const [moved] = await checkOne(repo);
+    expect(moved?.moved?.to).toEqual({ path: "c.ts", symbol: "withChecks" });
+  });
+
+  it("claims from two places can't both have moved to the same one: neither is told it did", async () => {
+    const f = "export function build(x: number): number {\n  return x * 7;\n}\n";
+    const repo = await repoWith({
+      "a.ts": f,
+      "b.ts": f,
+      "A.md": `${doc("a.ts#build")}\n${doc("b.ts#build")}`,
+    });
+    await linkDoc(repo, "A.md", DEFAULT_CONFIG, actor);
+    await put(repo, { "a.ts": "export const a = 1;\n", "b.ts": "export const b = 1;\n", "c.ts": f });
+    const results = await checkOne(repo);
+    expect(results).toHaveLength(2);
+    for (const r of results) {
+      expect(r.moved?.to).toBeUndefined();
+      expect(r.moved?.candidates).toEqual([{ path: "c.ts", symbol: "build" }]);
+    }
+    expect((await repoint(repo, DEFAULT_CONFIG, actor)).repointed).toEqual([]);
+    // A person who knows which one it was can say so.
+    const [first] = results;
+    const out = await repoint(repo, DEFAULT_CONFIG, actor, {
+      ids: [first?.anchor.id ?? ""],
+      to: { path: "c.ts", symbol: "build" },
+    });
+    expect(out.repointed).toHaveLength(1);
+  });
+
+  it("a method is found through its class under the same path, not in some other class's identical method", async () => {
+    const method = `    def fetch(self, url):
+        return self.session.get(url, timeout=1.5)
+`;
+    const repo = await repoWith({
+      "client.py": `class Client:\n${method}`,
+      "other.py": `class Other:\n${method}`,
+      "A.md": doc("client.py#Client.fetch"),
+    });
+    await linkDoc(repo, "A.md", DEFAULT_CONFIG, actor);
+    await put(repo, {
+      "client.py": "def unrelated():\n    return 1\n",
+      "http/client.py": `class Client:\n${method}`,
+    });
+    const [r] = await checkOne(repo);
+    expect(r?.moved?.to).toEqual({ path: "http/client.py", symbol: "Client.fetch" });
+    expect(r?.moved?.candidates).toHaveLength(1);
+  });
+
+  // The search only parses files that appear to declare the symbol, so each way the extractor can
+  // see a symbol has to look like a declaration to it.
+  const FORMS: [string, string, string, string][] = [
+    ["an arrow function in a const", "sq.ts", "export const sq = (n: number): number => n * n;\n", "sq"],
+    ["a typed const function", "h.ts", "export const h: (n: number) => number = function (n) { return n + 1; };\n", "h"],
+    [
+      "a method with modifiers, through its class",
+      "box.ts",
+      "export class Box {\n  public static async make(x: number) {\n    return x + 1;\n  }\n}\n",
+      "Box.make",
+    ],
+    ["a CommonJS export", "send.js", "exports.send = function (a) {\n  return a + 1;\n};\n", "send"],
+    [
+      "a prototype method",
+      "view.js",
+      "function View() {}\nView.prototype.render = function (x) {\n  return x + 2;\n};\n",
+      "View.render",
+    ],
+    ["a generator", "gen.ts", "export function* ids(n: number) {\n  for (let i = 0; i < n; i++) yield i;\n}\n", "ids"],
+    [
+      "a namespace member",
+      "ns.ts",
+      "export namespace NA {\n  export function helper(x: number) {\n    return x * 3;\n  }\n}\n",
+      "NA.helper",
+    ],
+    ["an interface", "types.ts", "export interface Options {\n  retries: number;\n  delay: number;\n}\n", "Options"],
+    ["a type alias", "alias.ts", "export type Handler = (req: Request, res: Response) => Promise<void>;\n", "Handler"],
+    ["an async Python function", "svc.py", "async def fetch_all(urls):\n    return [await get(u) for u in urls]\n", "fetch_all"],
+    [
+      "a decorated Python function",
+      "dec.py",
+      "@cache\ndef compute(x):\n    return x * 99 + offset(x)\n",
+      "compute",
+    ],
+  ];
+  for (const [what, file, code, symbol] of FORMS)
+    it(`finds ${what} after it moves`, async () => {
+      const repo = await repoWith({ [file]: code, "A.md": doc(`${file}#${symbol}`, "sig") });
+      expect((await linkDoc(repo, "A.md", DEFAULT_CONFIG, actor)).created).toBe(1);
+      const moved = `lib/${file}`;
+      await rm(join(repo, file));
+      await put(repo, { [moved]: code });
+      const [r] = await checkOne(repo);
+      expect(r?.moved?.to, what).toEqual({ path: moved, symbol });
+    });
+
+  it("a renamed function whose body also changed is suggested, not silently re-bound", async () => {
+    const repo = await repoWith({
+      "a.ts": "export function alpha(x: number): number {\n  return x + 1;\n}\n",
+      "A.md": doc("a.ts#alpha"),
+    });
+    await linkDoc(repo, "A.md", DEFAULT_CONFIG, actor);
+    await put(repo, { "a.ts": "export function beta(x: number): number {\n  return x + 2;\n}\n" });
+    const result = await check(repo, DEFAULT_CONFIG, undefined, { write: false });
+    const [r] = result.results;
+    expect(r).toMatchObject({ status: "orphaned", similar: { path: "a.ts", symbol: "beta" } });
+    expect(r?.anchor.target.symbol).toBe("alpha");
+    expect(formatText(result)).toMatch(/a\.ts#beta has the same signature/);
+    expect(formatText(result)).toContain("lockwire repoint <id> --to <path#symbol>");
+    // Two candidates are no suggestion at all.
+    await put(repo, {
+      "a.ts":
+        "export function beta(x: number): number {\n  return x + 2;\n}\nexport function gamma(x: number): number {\n  return x + 3;\n}\n",
+    });
+    expect((await check(repo, DEFAULT_CONFIG, undefined, { write: false })).results[0]?.similar).toBeUndefined();
   });
 });

@@ -57,7 +57,9 @@ export declare function findRelocationCandidate(symbols: FileSymbols, missingSig
 /**
  * The vanished symbol's stamped body and deps. When given, a candidate must also match one of them:
  * a rename keeps the implementation, while a deleted function's look-alike neighbour (same
- * parameters, different code) is not where its claim went.
+ * parameters, different code) is not where its claim went. An empty body or no calls at all is no
+ * evidence: any two functions with the same parameters would "match" on it (`findPosX` and
+ * `findPosY`, both calling nothing).
  */
 stamped?: Pick<Fingerprints, "body" | "deps">): string | null;
 export interface LinkResult {
@@ -121,6 +123,12 @@ export interface AnchorCheckResult {
      * whose code changed where it was. `lockwire repoint` re-points the claim to `to`.
      */
     moved?: MoveHint;
+    /**
+     * On an orphaned anchor: the one other symbol in the file with the same signature, when nothing
+     * else ties it to the missing one (a renamed function whose body also changed looks just like a
+     * look-alike neighbour). Not acted on; `lockwire repoint <id> --to` re-points the claim to it.
+     */
+    similar?: AnchorTarget;
     /** Where the symbol is really defined, when the target's file only re-exports it. */
     definedAt?: AnchorTarget;
     singleHashWouldFlag: boolean;

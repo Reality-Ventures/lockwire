@@ -5,7 +5,7 @@ import type { AnchorCheckResult, CheckResult } from "./actions.js";
  * `value: 0.18 -> 0.19`, or `claim says 0.18, value is 0.19` when the sentence no longer holds.
  */
 export function describeDrift(
-  r: Pick<AnchorCheckResult, "driftedTiers" | "claimChanged" | "value" | "moved">,
+  r: Pick<AnchorCheckResult, "driftedTiers" | "claimChanged" | "value" | "moved" | "similar">,
 ): string {
   const parts: string[] = r.driftedTiers.filter((t) => t !== "value");
   if (r.claimChanged) parts.push("claim");
@@ -20,6 +20,7 @@ export function describeDrift(
     );
   const moved = describeMove(r.moved);
   if (moved) parts.push(moved);
+  if (r.similar) parts.push(`${label(r.similar)} has the same signature`);
   return parts.join(", ");
 }
 
@@ -93,6 +94,13 @@ export function formatText(result: CheckResult): string {
     lines.push("");
   }
 
+  if (result.results.some((r) => !r.skipped && r.similar)) {
+    lines.push(
+      "Where a symbol is gone and another has the same signature: if it was renamed, `lockwire repoint <id> --to <path#symbol>` re-points the claim.",
+      "",
+    );
+  }
+
   const { summary } = result;
   lines.push(
     `${summary.anchors} anchor${summary.anchors === 1 ? "" : "s"} · ${summary.fresh} ok · ${summary.drifted} drifted · ${summary.orphaned} orphaned${summary.relocated > 0 ? ` · ${summary.relocated} relocated` : ""}${summary.unlinked > 0 ? ` · ${summary.unlinked} unlinked` : ""}`,
@@ -122,6 +130,7 @@ export function formatJson(result: CheckResult, repo: string | null): string {
         claimChanged: r.claimChanged ?? false,
         value: r.value ?? null,
         moved: r.moved ?? null,
+        similar: r.similar ?? null,
         definedAt: r.definedAt ?? null,
         excerpt: r.anchor.claim?.excerpt ?? null,
       })),

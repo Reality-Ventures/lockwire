@@ -67,6 +67,11 @@ function resolutionsOf(kind, r) {
             `The code this claim describes moved, unchanged, to ${label(to)}: call lockwire_repoint for this anchor to point the claim and its marker there. If the sentence names the old file, fix that wording too.`,
             ...RESOLUTIONS[kind],
         ];
+    if (r.similar)
+        return [
+            `${label(r.similar)} has the same signature as the missing symbol: if it was renamed to it, call lockwire_repoint for this anchor with \`to\` set to ${label(r.similar)}; the claim stays flagged if its code also changed, so you can review it.`,
+            ...RESOLUTIONS[kind],
+        ];
     if (r.moved)
         return [
             `The code this claim describes is now in several places (${r.moved.candidates.map(label).join(", ")}): pick the one the claim is about and call lockwire_repoint with it as \`to\`.`,
