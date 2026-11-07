@@ -5,7 +5,7 @@
  * demo servers that a stdio-only server never loads but every install downloads and every scanner
  * flags. The tests drive this server with the official SDK client, so it stays compatible with it.
  */
-import { z } from "zod";
+import { type Output, objectJson, parseObject, type Shape } from "./schema.js";
 
 /** Protocol versions this server speaks, newest first. A client asking for another gets the newest. */
 export const SUPPORTED_PROTOCOL_VERSIONS = [
@@ -77,7 +77,7 @@ interface PromptResult {
 interface Tool {
   title: string;
   description: string;
-  input: z.ZodObject;
+  input: Shape;
   annotations: ToolAnnotations;
   // biome-ignore lint/suspicious/noExplicitAny: each tool's handler takes its own schema's output
   handler: (args: any) => Promise<ToolResult> | ToolResult;
@@ -86,20 +86,10 @@ interface Tool {
 interface Prompt {
   title: string;
   description: string;
-  args: z.ZodObject;
+  args: Shape;
   // biome-ignore lint/suspicious/noExplicitAny: each prompt's handler takes its own schema's output
   handler: (args: any) => Promise<PromptResult> | PromptResult;
 }
-
-/** A schema's JSON Schema, as a tool listing shows it to the model. */
-const jsonSchema = (schema: z.ZodObject) =>
-  z.toJSONSchema(schema, { target: "draft-7", io: "input" }) as Record<string, unknown>;
-
-/** zod's issues as one line: `Invalid input: expected string, received number at path`. */
-const issuesText = (error: z.ZodError) =>
-  error.issues
-    .map((i) => `${i.message}${i.path.length ? ` at ${i.path.join(".")}` : ""}`)
-    .join("; ");
 
 export class McpServer {
   private readonly tools = new Map<string, Tool>();
@@ -118,29 +108,29 @@ export class McpServer {
     return this.clientInfo;
   }
 
-  registerTool<S extends z.ZodRawShape>(
+  registerTool<S extends Shape>(
     name: string,
     def: { title: string; description: string; inputSchema: S; annotations: ToolAnnotations },
-    handler: (args: z.output<z.ZodObject<S>>) => Promise<ToolResult> | ToolResult,
+    handler: (args: Output<S>) => Promise<ToolResult> | ToolResult,
   ): void {
     this.tools.set(name, {
       title: def.title,
       description: def.description,
-      input: z.object(def.inputSchema),
+      input: def.inputSchema,
       annotations: def.annotations,
       handler,
     });
   }
 
-  registerPrompt<S extends z.ZodRawShape>(
+  registerPrompt<S extends Shape>(
     name: string,
     def: { title: string; description: string; argsSchema: S },
-    handler: (args: z.output<z.ZodObject<S>>) => Promise<PromptResult> | PromptResult,
+    handler: (args: Output<S>) => Promise<PromptResult> | PromptResult,
   ): void {
     this.prompts.set(name, {
       title: def.title,
       description: def.description,
-      args: z.object(def.argsSchema),
+      args: def.argsSchema,
       handler,
     });
   }
@@ -200,7 +190,7 @@ export class McpServer {
             name,
             title: t.title,
             description: t.description,
-            inputSchema: jsonSchema(t.input),
+            inputSchema: objectJson(t.input),
             annotations: t.annotations,
           })),
         };
@@ -212,9 +202,9 @@ export class McpServer {
             name,
             title: p.title,
             description: p.description,
-            arguments: Object.entries(p.args.shape).map(([arg, schema]) => ({
+            arguments: Object.entries(p.args).map(([arg, field]) => ({
               name: arg,
-              required: !(schema as z.ZodType).safeParse(undefined).success,
+              required: field.required,
             })),
           })),
         };
@@ -222,13 +212,13 @@ export class McpServer {
         const name = String(params.name);
         const prompt = this.prompts.get(name);
         if (!prompt) throw new RpcError(ErrorCode.InvalidParams, `Prompt ${name} not found`);
-        const parsed = prompt.args.safeParse(params.arguments ?? {});
-        if (!parsed.success)
+        const parsed = parseObject(prompt.args, params.arguments ?? {});
+        if ("problem" in parsed)
           throw new RpcError(
             ErrorCode.InvalidParams,
-            `Invalid arguments for prompt ${name}: ${issuesText(parsed.error)}`,
+            `Invalid arguments for prompt ${name}: ${parsed.problem}`,
           );
-        return prompt.handler(parsed.data);
+        return prompt.handler(parsed.value);
       }
       default:
         throw new RpcError(ErrorCode.MethodNotFound, `Method not found: ${method}`);
@@ -244,11 +234,10 @@ export class McpServer {
     const name = String(params.name);
     const tool = this.tools.get(name);
     if (!tool) return failed(`Tool ${name} not found`);
-    const parsed = tool.input.safeParse(params.arguments ?? {});
-    if (!parsed.success)
-      return failed(`Invalid arguments for tool ${name}: ${issuesText(parsed.error)}`);
+    const parsed = parseObject(tool.input, params.arguments ?? {});
+    if ("problem" in parsed) return failed(`Invalid arguments for tool ${name}: ${parsed.problem}`);
     try {
-      return await tool.handler(parsed.data);
+      return await tool.handler(parsed.value);
     } catch (err) {
       return failed(err instanceof Error ? err.message : String(err));
     }

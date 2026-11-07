@@ -1,12 +1,12 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
 import {
   type JsonRpcMessage,
   McpServer,
   StdioServerTransport,
   SUPPORTED_PROTOCOL_VERSIONS,
 } from "../src/mcp-protocol.js";
+import { s } from "../src/schema.js";
 
 /** A server on in-memory pipes: write raw lines in, read parsed replies out. */
 async function wired() {
@@ -16,7 +16,7 @@ async function wired() {
     {
       title: "Echo",
       description: "Echoes",
-      inputSchema: { say: z.string() },
+      inputSchema: { say: s.string() },
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,

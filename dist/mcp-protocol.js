@@ -5,7 +5,7 @@
  * demo servers that a stdio-only server never loads but every install downloads and every scanner
  * flags. The tests drive this server with the official SDK client, so it stays compatible with it.
  */
-import { z } from "zod";
+import { objectJson, parseObject } from "./schema.js";
 /** Protocol versions this server speaks, newest first. A client asking for another gets the newest. */
 export const SUPPORTED_PROTOCOL_VERSIONS = [
     "2025-11-25",
@@ -28,12 +28,6 @@ class RpcError extends Error {
         this.code = code;
     }
 }
-/** A schema's JSON Schema, as a tool listing shows it to the model. */
-const jsonSchema = (schema) => z.toJSONSchema(schema, { target: "draft-7", io: "input" });
-/** zod's issues as one line: `Invalid input: expected string, received number at path`. */
-const issuesText = (error) => error.issues
-    .map((i) => `${i.message}${i.path.length ? ` at ${i.path.join(".")}` : ""}`)
-    .join("; ");
 export class McpServer {
     info;
     instructions;
@@ -55,7 +49,7 @@ export class McpServer {
         this.tools.set(name, {
             title: def.title,
             description: def.description,
-            input: z.object(def.inputSchema),
+            input: def.inputSchema,
             annotations: def.annotations,
             handler,
         });
@@ -64,7 +58,7 @@ export class McpServer {
         this.prompts.set(name, {
             title: def.title,
             description: def.description,
-            args: z.object(def.argsSchema),
+            args: def.argsSchema,
             handler,
         });
     }
@@ -124,7 +118,7 @@ export class McpServer {
                         name,
                         title: t.title,
                         description: t.description,
-                        inputSchema: jsonSchema(t.input),
+                        inputSchema: objectJson(t.input),
                         annotations: t.annotations,
                     })),
                 };
@@ -136,9 +130,9 @@ export class McpServer {
                         name,
                         title: p.title,
                         description: p.description,
-                        arguments: Object.entries(p.args.shape).map(([arg, schema]) => ({
+                        arguments: Object.entries(p.args).map(([arg, field]) => ({
                             name: arg,
-                            required: !schema.safeParse(undefined).success,
+                            required: field.required,
                         })),
                     })),
                 };
@@ -147,10 +141,10 @@ export class McpServer {
                 const prompt = this.prompts.get(name);
                 if (!prompt)
                     throw new RpcError(ErrorCode.InvalidParams, `Prompt ${name} not found`);
-                const parsed = prompt.args.safeParse(params.arguments ?? {});
-                if (!parsed.success)
-                    throw new RpcError(ErrorCode.InvalidParams, `Invalid arguments for prompt ${name}: ${issuesText(parsed.error)}`);
-                return prompt.handler(parsed.data);
+                const parsed = parseObject(prompt.args, params.arguments ?? {});
+                if ("problem" in parsed)
+                    throw new RpcError(ErrorCode.InvalidParams, `Invalid arguments for prompt ${name}: ${parsed.problem}`);
+                return prompt.handler(parsed.value);
             }
             default:
                 throw new RpcError(ErrorCode.MethodNotFound, `Method not found: ${method}`);
@@ -166,11 +160,11 @@ export class McpServer {
         const tool = this.tools.get(name);
         if (!tool)
             return failed(`Tool ${name} not found`);
-        const parsed = tool.input.safeParse(params.arguments ?? {});
-        if (!parsed.success)
-            return failed(`Invalid arguments for tool ${name}: ${issuesText(parsed.error)}`);
+        const parsed = parseObject(tool.input, params.arguments ?? {});
+        if ("problem" in parsed)
+            return failed(`Invalid arguments for tool ${name}: ${parsed.problem}`);
         try {
-            return await tool.handler(parsed.data);
+            return await tool.handler(parsed.value);
         }
         catch (err) {
             return failed(err instanceof Error ? err.message : String(err));

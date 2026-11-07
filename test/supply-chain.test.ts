@@ -15,9 +15,9 @@ describe("supply chain", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("the runtime dependencies are exactly these three; adding one is a decision, not a side effect", () => {
+  it("the one runtime dependency is the parser; adding another is a decision, not a side effect", () => {
     const pkg = JSON.parse(read("package.json")) as { dependencies: Record<string, string> };
-    expect(Object.keys(pkg.dependencies).sort()).toEqual(["@noble/hashes", "web-tree-sitter", "zod"]);
+    expect(Object.keys(pkg.dependencies).sort()).toEqual(["web-tree-sitter"]);
   });
 
   it("the Claude Code plugin isn't pinned to a version, so Claude Code sees each release as an update", () => {

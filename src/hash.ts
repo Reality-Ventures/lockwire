@@ -1,5 +1,4 @@
-import { blake3 } from "@noble/hashes/blake3.js";
-import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
+import { blake3Hex } from "./blake3.js";
 
 /**
  * A lockwire fingerprint: `b3:` + 32 lowercase hex chars — the first 16 bytes
@@ -8,8 +7,7 @@ import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
  * an adversary who controls the input), and it keeps `lockwire.lock` compact.
  */
 export function fingerprint(input: string): string {
-  const full = blake3(utf8ToBytes(input));
-  return `b3:${bytesToHex(full.subarray(0, 16))}`;
+  return `b3:${blake3Hex(Buffer.from(input, "utf8"), 16)}`;
 }
 
 /** Hash a sorted-unique string set as a single fingerprint (used for the `deps` tier and the ledger root). */

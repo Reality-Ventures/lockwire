@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { z } from "zod";
 import {
   ack,
   check,
@@ -20,6 +19,7 @@ import { withRepoLock } from "./lock.js";
 import { lockfilePath, readLockfileSync } from "./lockfile.js";
 import { McpServer, StdioServerTransport } from "./mcp-protocol.js";
 import { toRepoPath } from "./repo.js";
+import { s } from "./schema.js";
 import { fixDocsPrompt, listTasks, resolveTask, taskContext } from "./tasks.js";
 
 function text(payload: unknown) {
@@ -75,7 +75,7 @@ export function createServer(
       title: "Claims for code",
       description:
         "What does the documentation assert about this file or symbol? Call before editing. Returns `anchors` (claims lockwire is checking) and `unlinked` (claims written in a doc about this code that nobody has linked yet, so nothing is checking them — treat them as real claims too).",
-      inputSchema: { path: z.string(), symbol: z.string().optional() },
+      inputSchema: { path: s.string(), symbol: s.string().optional() },
       // Pure read (the lockfile and the docs; the doc index is held in memory, never written to disk) --
       // repeat calls are trivially idempotent.
       annotations: {
@@ -108,7 +108,7 @@ export function createServer(
     {
       title: "Reverse lookup",
       description: "Which documentation claims reference this file or symbol.",
-      inputSchema: { path: z.string(), symbol: z.string().optional() },
+      inputSchema: { path: s.string(), symbol: s.string().optional() },
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -128,7 +128,7 @@ export function createServer(
     {
       title: "Anchor status",
       description: "Current status of every anchor, optionally filtered by a glob scope.",
-      inputSchema: { scope: z.string().optional() },
+      inputSchema: { scope: s.string().optional() },
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -144,7 +144,7 @@ export function createServer(
     {
       title: "Verify a doc",
       description: "Check one document's anchors before committing it.",
-      inputSchema: { doc: z.string() },
+      inputSchema: { doc: s.string() },
       // Not read-only: check() writes the lockfile and appends ledger events on state
       // transitions. It IS idempotent -- every transition is guarded by the anchor's current
       // status (e.g. `if (anchor.status !== "drifted")`), so a repeat call with nothing else
@@ -179,7 +179,7 @@ export function createServer(
       title: "Anchor history",
       description:
         "Ledger timeline for an anchor id, a path#symbol, or a doc path — how many times has this claim broken, and how was it resolved.",
-      inputSchema: { ref: z.string() },
+      inputSchema: { ref: s.string() },
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -195,7 +195,7 @@ export function createServer(
     {
       title: "Create or refresh an anchor",
       description: "Scan a doc for lockwire markers and stamp fresh fingerprints.",
-      inputSchema: { doc: z.string(), reviewed: z.boolean().optional() },
+      inputSchema: { doc: s.string(), reviewed: s.boolean().optional() },
       // A second call with nothing changed in between stamps nothing and appends no ledger event.
       annotations: {
         readOnlyHint: false,
@@ -224,9 +224,9 @@ export function createServer(
       title: "Acknowledge drift",
       description: "Record that drift was handled and re-stamp the anchor's fingerprints.",
       inputSchema: {
-        anchor: z.string(),
-        resolution: z.enum(["updated", "superseded", "false-positive"]),
-        note: z.string().optional(),
+        anchor: s.string(),
+        resolution: s.enum(["updated", "superseded", "false-positive"]),
+        note: s.string().optional(),
       },
       // ack() unconditionally appends an anchor.acknowledged event every call, same reasoning
       // as lockwire_link -- each ack is a distinct logged action, so repeat calls are not a
@@ -251,7 +251,7 @@ export function createServer(
     {
       title: "Waive an anchor",
       description: "Time-boxed, logged, expiring waiver. No permanent suppression.",
-      inputSchema: { anchor: z.string(), reason: z.string(), expires: z.string() },
+      inputSchema: { anchor: s.string(), reason: s.string(), expires: s.string() },
       // waive() unconditionally appends a waiver.granted event every call -- same reasoning as
       // lockwire_link and lockwire_ack.
       annotations: {
@@ -274,9 +274,9 @@ export function createServer(
       description:
         "After moving code to another file: point every claim whose symbol moved there, unchanged, at its new path#symbol and rewrite its doc marker. `anchors` limits it to those ids; `to` (with one id) names the new home when lockwire found the code in several places or it changed on the way. A bound tier that differs at the new place stays drifted. `dryRun` reports what would change without writing.",
       inputSchema: {
-        anchors: z.array(z.string()).optional(),
-        to: z.string().optional(),
-        dryRun: z.boolean().optional(),
+        anchors: s.array(s.string()).optional(),
+        to: s.string().optional(),
+        dryRun: s.boolean().optional(),
       },
       // Re-pointing an anchor that already points at its new home skips it, so a repeat call with
       // nothing moved in between writes nothing.
@@ -318,7 +318,7 @@ export function createServer(
       title: "Documentation tasks",
       description:
         "Every documentation claim that needs attention, as a task list: claims whose code or value changed, numbers that no longer match their source, claims whose target is gone, and markers nobody has linked. Each task says what is wrong and what to do. Start here when asked to fix or update documentation. `paths` limits it to claims about (or in) those files; `changed` to files this branch touched.",
-      inputSchema: { paths: z.array(z.string()).optional(), changed: z.boolean().optional() },
+      inputSchema: { paths: s.array(s.string()).optional(), changed: s.boolean().optional() },
       // A dry run of check: computes everything, writes nothing.
       annotations: {
         readOnlyHint: true,
@@ -343,7 +343,7 @@ export function createServer(
       title: "Context for a task",
       description:
         "Everything needed to fix one task from lockwire_tasks: the whole claim sentence, the bound code (its declaration) or value as it was when the claim was stamped and as it is now, and the claim's history. `stamped.exact` says whether the stamped side is exactly what the claim was checked against.",
-      inputSchema: { id: z.string() },
+      inputSchema: { id: s.string() },
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -360,7 +360,7 @@ export function createServer(
       title: "Resolve a task",
       description:
         "After you have edited the doc so the claim is true, re-stamp that one claim (nothing else in the doc). It is checked first: a sentence whose number still disagrees with its value is refused, as is a marker whose target still doesn't exist. Pass a short `note` saying what you checked or changed; it goes into the claim's history. Returns resolved / already-fresh / refused (with the reason) and the tasks still open on the same doc.",
-      inputSchema: { id: z.string(), note: z.string().optional() },
+      inputSchema: { id: s.string(), note: s.string().optional() },
       // Writes the lockfile and ledger. Resolving an already-fresh claim is a no-op, so it is idempotent.
       annotations: {
         readOnlyHint: false,
@@ -379,7 +379,7 @@ export function createServer(
       title: "Fix documentation drift",
       description:
         "Work through lockwire's task list: fix every documentation claim that no longer matches the code or data it describes, and check each fix.",
-      argsSchema: { scope: z.string().optional() },
+      argsSchema: { scope: s.string().optional() },
     },
     ({ scope }) => ({
       messages: [

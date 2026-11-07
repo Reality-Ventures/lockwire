@@ -5,7 +5,7 @@
  * demo servers that a stdio-only server never loads but every install downloads and every scanner
  * flags. The tests drive this server with the official SDK client, so it stays compatible with it.
  */
-import { z } from "zod";
+import { type Output, type Shape } from "./schema.js";
 /** Protocol versions this server speaks, newest first. A client asking for another gets the newest. */
 export declare const SUPPORTED_PROTOCOL_VERSIONS: readonly ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 type Id = string | number;
@@ -82,17 +82,17 @@ export declare class McpServer {
         name?: string;
         version?: string;
     } | undefined;
-    registerTool<S extends z.ZodRawShape>(name: string, def: {
+    registerTool<S extends Shape>(name: string, def: {
         title: string;
         description: string;
         inputSchema: S;
         annotations: ToolAnnotations;
-    }, handler: (args: z.output<z.ZodObject<S>>) => Promise<ToolResult> | ToolResult): void;
-    registerPrompt<S extends z.ZodRawShape>(name: string, def: {
+    }, handler: (args: Output<S>) => Promise<ToolResult> | ToolResult): void;
+    registerPrompt<S extends Shape>(name: string, def: {
         title: string;
         description: string;
         argsSchema: S;
-    }, handler: (args: z.output<z.ZodObject<S>>) => Promise<PromptResult> | PromptResult): void;
+    }, handler: (args: Output<S>) => Promise<PromptResult> | PromptResult): void;
     connect(transport: Transport): Promise<void>;
     close(): Promise<void>;
     private receive;
