@@ -1,6 +1,4 @@
 import { existsSync } from "node:fs";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import {
   ack,
@@ -19,6 +17,7 @@ import { readConfig } from "./config.js";
 import type { IndexStats } from "./docindex.js";
 import { withRepoLock } from "./lock.js";
 import { lockfilePath } from "./lockfile.js";
+import { McpServer, StdioServerTransport } from "./mcp-protocol.js";
 import { toRepoPath } from "./repo.js";
 import { fixDocsPrompt, listTasks, resolveTask, taskContext } from "./tasks.js";
 
@@ -51,7 +50,7 @@ export function createServer(
 
   /** Who is acting: the MCP client's own name (claude-code, codex, cursor…) when it gave one. */
   const agentActor = () => {
-    const client = server.server.getClientVersion();
+    const client = server.getClientVersion();
     return {
       type: "ai" as const,
       tool: client?.name
