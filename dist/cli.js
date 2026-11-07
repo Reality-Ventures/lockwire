@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { ack, check, discoverDocs, history, linkDoc, linkLockfileOnly, refs, status, unlink, waive, } from "./actions.js";
+import { ack, check, discoverDocs, history, linkDoc, linkLockfileOnly, refs, repoint, status, unlink, waive, } from "./actions.js";
 import { cliActor } from "./actor.js";
 import { autofix } from "./autofix.js";
 import { changedFiles } from "./changed.js";
@@ -67,6 +67,7 @@ const CLI_TWIN = {
     lockwire_task_context: "lockwire task <id>",
     lockwire_resolve: "lockwire resolve <id>",
     lockwire_ack: "lockwire ack <id>",
+    lockwire_repoint: "lockwire repoint <id>",
 };
 /** Task guidance and refusals are written for agents (MCP tool names); a CLI user gets the commands. */
 function forCli(message, id) {
@@ -76,7 +77,7 @@ function forCli(message, id) {
     };
     return message
         .replace(/\b(?:call|Read) (lockwire_\w+)(?: with resolution ([\w-]+))?/g, (_, tool, resolution) => `run \`${twin(tool)}${resolution ? ` --resolution ${resolution}` : ""}\``)
-        .replace(/\blockwire_(?:tasks|task_context|resolve|ack)\b/g, (tool) => `\`${twin(tool)}\``);
+        .replace(/\blockwire_(?:tasks|task_context|resolve|ack|repoint)\b/g, (tool) => `\`${twin(tool)}\``);
 }
 function printLinkResult(doc, result) {
     console.log(`${doc}: ${result.created} created, ${result.refreshed} refreshed${result.unchanged ? `, ${result.unchanged} unchanged` : ""}${result.skipped.length ? `, ${result.skipped.length} skipped` : ""}`);
@@ -195,6 +196,7 @@ async function main() {
                     : formatText(result);
             console.log(out);
             if (fmt === "text" && !flags["no-write"] && result.summary.relocated > 0) {
+                // Same-file renames: `check` already moved the anchor, the marker follows on the next link.
                 const docs = [
                     ...new Set(result.results
                         .filter((r) => r.anchor.doc && r.anchor.target.symbol)
@@ -206,6 +208,43 @@ async function main() {
                 result.summary.orphaned > 0 ||
                 (Boolean(flags["fail-on-unlinked"]) && result.summary.unlinked > 0);
             process.exitCode = failed ? 1 : 0;
+            break;
+        }
+        case "repoint": {
+            // Claims whose code moved to another file: point them at its new home, markers included.
+            const config = await readConfig(repoRoot);
+            let to;
+            if (typeof flags.to === "string") {
+                const [rawPath, symbol] = splitTarget(flags.to);
+                if (!rawPath)
+                    throw new Error("--to must be path or path#Symbol");
+                to = { path: toRepoPath(repoRoot, rawPath), ...(symbol ? { symbol } : {}) };
+            }
+            else if (flags.to)
+                throw new Error("--to needs a target: --to path#Symbol");
+            const result = await withRepoLock(repoRoot, () => repoint(repoRoot, config, actor, {
+                ...(positional.length > 0 ? { ids: positional } : {}),
+                ...(to ? { to } : {}),
+                reviewed: Boolean(flags.reviewed),
+                dryRun: Boolean(flags["dry-run"]),
+            }));
+            if (flags.json) {
+                console.log(JSON.stringify(result, null, 2));
+            }
+            else {
+                const label = (t) => `${t.path}${t.symbol ? `#${t.symbol}` : ""}`;
+                const verb = flags["dry-run"] ? "would re-point" : "re-pointed";
+                for (const o of result.repointed) {
+                    console.log(`${verb} ${o.id}  ${label(o.from)} -> ${label(o.to)}${o.status === "drifted" ? ` (drifted: ${o.driftedTiers.join(", ")} differ there — review the claim, then link --reviewed)` : ""}`);
+                    if (o.claimNamesOldPath)
+                        console.log(`  ${o.doc}: the claim sentence still names ${o.from.path}`);
+                }
+                for (const s of result.skipped)
+                    console.log(`skipped ${s.id}  ${s.target}: ${s.reason}`);
+                if (result.repointed.length === 0 && result.skipped.length === 0)
+                    console.log("nothing to re-point: no claim's code moved to another file");
+            }
+            process.exitCode = result.skipped.length > 0 ? 1 : 0;
             break;
         }
         case "status": {
@@ -408,7 +447,7 @@ async function main() {
         }
         default:
             console.log("lockwire — bind documentation claims to code fingerprints\n");
-            console.log("commands: init, link, check, tasks, task, resolve, autofix, status, refs, history, ack, waive, unlink, ledger verify, index, hook, mcp");
+            console.log("commands: init, link, check, repoint, tasks, task, resolve, autofix, status, refs, history, ack, waive, unlink, ledger verify, index, hook, mcp");
             process.exitCode = cmd ? 1 : 0;
     }
 }

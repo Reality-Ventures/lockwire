@@ -105,6 +105,12 @@ export function buildAdvisoryText(
 export const UNLINKED_SCAN_BUDGET_MS = 750;
 
 /**
+ * How long the PostToolUse hook may spend looking for where a vanished symbol's code went. Past it the
+ * claim is just reported orphaned, and `lockwire check` (no budget) still finds the move.
+ */
+export const MOVE_SEARCH_BUDGET_MS = 1000;
+
+/**
  * Claims in the docs about the file about to be edited that no anchor backs. Never throws and never
  * blocks the edit: the anchored claims are the hook's job, this is a courtesy on top, so any failure
  * or a blown time budget just means it's left out (and noted in `.lockwire/hook.log`).
@@ -160,7 +166,10 @@ export async function reportDriftFor(
   if (!isLockwireRepo(repoRoot)) return { text: "", anyDrift: false };
   const config = await readConfig(repoRoot);
   const result = await withRepoLock(repoRoot, () =>
-    check(repoRoot, config, [touchedPath], actor ? { actor } : {}),
+    check(repoRoot, config, [touchedPath], {
+      ...(actor ? { actor } : {}),
+      moveSearchMs: MOVE_SEARCH_BUDGET_MS,
+    }),
   );
   const relevant = result.results.filter(
     (r) =>
@@ -181,7 +190,9 @@ export async function reportDriftFor(
       [
         `lockwire: this edit drifted documentation claims:`,
         ...lines,
-        `Update the doc and run \`lockwire link <doc>\`, or \`lockwire ack\`/\`lockwire waive\` if this is expected.`,
+        relevant.some((r) => r.moved?.to)
+          ? `Where the code moved, run \`lockwire repoint\` to re-point the claim and its marker. Otherwise update the doc and run \`lockwire link <doc>\`, or \`lockwire ack\`/\`lockwire waive\` if this is expected.`
+          : `Update the doc and run \`lockwire link <doc>\`, or \`lockwire ack\`/\`lockwire waive\` if this is expected.`,
       ].join("\n"),
     );
   }

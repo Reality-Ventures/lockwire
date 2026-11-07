@@ -25,6 +25,11 @@ export declare function buildAdvisoryText(anchors: Anchor[], config: LockwireCon
 /** How long the PreToolUse hook may spend looking for unlinked claims before giving up on them. */
 export declare const UNLINKED_SCAN_BUDGET_MS = 750;
 /**
+ * How long the PostToolUse hook may spend looking for where a vanished symbol's code went. Past it the
+ * claim is just reported orphaned, and `lockwire check` (no budget) still finds the move.
+ */
+export declare const MOVE_SEARCH_BUDGET_MS = 1000;
+/**
  * Claims in the docs about the file about to be edited that no anchor backs. Never throws and never
  * blocks the edit: the anchored claims are the hook's job, this is a courtesy on top, so any failure
  * or a blown time budget just means it's left out (and noted in `.lockwire/hook.log`).

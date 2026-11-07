@@ -56,7 +56,7 @@ describe("MCP server tools", () => {
     anchorId = anchor!.id;
   });
 
-  it("lists all 11 tools with all four annotation hints explicitly set", async () => {
+  it("lists all 12 tools with all four annotation hints explicitly set", async () => {
     const client = await connectedClient(repo);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
@@ -67,6 +67,7 @@ describe("MCP server tools", () => {
         "lockwire_history",
         "lockwire_link",
         "lockwire_refs",
+        "lockwire_repoint",
         "lockwire_resolve",
         "lockwire_status",
         "lockwire_task_context",

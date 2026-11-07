@@ -1,6 +1,8 @@
 import { type IndexState, type IndexStats } from "./docindex.js";
 import { type DocMarker } from "./markers.js";
-import type { Actor, Anchor, FileSymbols, Fingerprints, Lockfile, LockwireConfig, Tier } from "./types.js";
+import { type MoveHint } from "./moves.js";
+import { type ReExports } from "./reexports.js";
+import type { Actor, Anchor, AnchorTarget, FileSymbols, Fingerprints, Lockfile, LockwireConfig, Tier } from "./types.js";
 export interface TargetResolution {
     found: boolean;
     fingerprints: Fingerprints;
@@ -12,6 +14,11 @@ export interface TargetResolution {
     };
     /** When not found and there's more to say (an ambiguous CSV row, a missing column). */
     reason?: string;
+    /**
+     * Where the symbol is really defined, when the target's file only re-exports it (a name kept at the
+     * old path for compatibility after a move). Absent when it is defined where the target says.
+     */
+    definedAt?: AnchorTarget;
 }
 /** The fingerprint version an anchor was stamped with (anchors from before versions are version 1). */
 export declare const versionOf: (anchor: Pick<Anchor, "fingerprintVersion">) => number;
@@ -22,7 +29,11 @@ export declare const versionOf: (anchor: Pick<Anchor, "fingerprintVersion">) => 
 export declare function resolveTarget(repoRoot: string, target: {
     path: string;
     symbol?: string;
-}, config: LockwireConfig, version?: number): Promise<TargetResolution | null>;
+}, config: LockwireConfig, version?: number): Promise<(TargetResolution & {
+    source?: string;
+}) | null>;
+/** A source file's symbols, parsed (or served from the parse cache) the way `version` reads them. */
+export declare function symbolsOfSource(path: string, content: string, config: LockwireConfig, version?: number): Promise<FileSymbols | null>;
 /**
  * {@link resolveTarget} on given file contents rather than the file on disk — used to fingerprint a
  * target as it was at an earlier commit. `source` is the bound symbol's declaration as written.
@@ -32,14 +43,15 @@ export declare function resolveTargetInText(target: {
     symbol?: string;
 }, content: string, config: LockwireConfig, version?: number): Promise<TargetResolution & {
     source?: string;
+    reExports?: ReExports;
 }>;
 /**
  * Same-file rename detection: if a symbol vanished but exactly one other symbol in the file has the
  * same signature apart from its name, relink to it. `sig` fingerprints include the symbol's name,
  * so each candidate is re-rendered under the missing symbol's old name before comparing -- that
  * keeps stored fingerprints valid. Symbols already bound by another anchor are skipped, so an
- * unrelated neighbour with the same shape isn't mistaken for the rename target. Cross-file
- * relocation (the symbol moved to a different file) is not attempted in P0 — see docs/concepts.md limitations.
+ * unrelated neighbour with the same shape isn't mistaken for the rename target. A symbol moved to a
+ * different file is found by `SourceIndex.findMove` (moves.ts) and re-pointed by {@link repoint}.
  */
 export declare function findRelocationCandidate(symbols: FileSymbols, missingSigFp: string, oldName: string, taken?: ReadonlySet<string>, 
 /**
@@ -101,6 +113,14 @@ export interface AnchorCheckResult {
         claimed: string[];
         matches: boolean;
     };
+    /**
+     * The bound symbol's code as stamped was found in another file: where it went (`to`, when there is
+     * exactly one place) and every place it was found. Set on an orphaned anchor, and on a drifted one
+     * whose code changed where it was. `lockwire repoint` re-points the claim to `to`.
+     */
+    moved?: MoveHint;
+    /** Where the symbol is really defined, when the target's file only re-exports it. */
+    definedAt?: AnchorTarget;
     singleHashWouldFlag: boolean;
 }
 export interface CheckSummary {
@@ -111,6 +131,8 @@ export interface CheckSummary {
     orphaned: number;
     waived: number;
     superseded: number;
+    /** Anchors whose code moved, unchanged, to exactly one other place: `lockwire repoint` re-points them. */
+    moved: number;
     /** Markers in the scanned docs that no anchor backs: those claims aren't being checked. */
     unlinked: number;
     noise: {
@@ -177,6 +199,11 @@ export declare function inPathScope(path: string, scope: readonly string[]): boo
 export declare function check(repoRoot: string, config: LockwireConfig, onlyPaths?: readonly string[], opts?: {
     write?: boolean;
     actor?: Actor;
+    /**
+     * How long the search for moved symbols may take, in ms, from when it is first needed (it reads
+     * every source file once). 0 turns it off. Unlimited by default; hooks pass a budget.
+     */
+    moveSearchMs?: number;
 }): Promise<CheckResult>;
 /**
  * Docs the config selects. A symlinked doc is skipped: it's another name for a file the walk reaches
@@ -184,6 +211,46 @@ export declare function check(repoRoot: string, config: LockwireConfig, onlyPath
  */
 export declare function discoverDocs(repoRoot: string, config: LockwireConfig): Promise<string[]>;
 export declare function ack(repoRoot: string, anchorId: string, resolution: "updated" | "superseded" | "false-positive", note: string | undefined, actor: Actor, config: LockwireConfig): Promise<Anchor>;
+export interface RepointOutcome {
+    id: string;
+    doc: string | null;
+    from: AnchorTarget;
+    to: AnchorTarget;
+    /**
+     * `fresh` when the code at the new place is the code as stamped; `drifted` when a bound tier differs
+     * there, in which case that tier keeps its stamped fingerprint so `check` goes on showing the drift.
+     */
+    status: Anchor["status"];
+    driftedTiers: Tier[];
+    /** The doc's marker was rewritten to name the new place. */
+    markerUpdated: boolean;
+    /** The claim sentence itself names the old file, so its wording needs the same edit. */
+    claimNamesOldPath: boolean;
+}
+export interface RepointResult {
+    repointed: RepointOutcome[];
+    skipped: {
+        id: string;
+        target: string;
+        reason: string;
+    }[];
+}
+/**
+ * `lockwire repoint`: move claims whose code moved to another file over to its new home, rewriting
+ * each doc marker to match. With no `to`, the new home is where `check` found the symbol's code as
+ * stamped (only when there is exactly one such place); `ids` limits it to those anchors. With `to`
+ * (and one id), it is that target, for a move lockwire couldn't place on its own.
+ *
+ * The path changes by definition, and so may `export` on the signature (a helper moved into a module
+ * of its own is usually exported now). Any other bound tier that differs at the new place is drift and
+ * stays drift, unless `reviewed` says a person checked the claim against the code there.
+ */
+export declare function repoint(repoRoot: string, config: LockwireConfig, actor: Actor, opts?: {
+    ids?: readonly string[];
+    to?: AnchorTarget;
+    reviewed?: boolean;
+    dryRun?: boolean;
+}): Promise<RepointResult>;
 export declare function waive(repoRoot: string, anchorId: string, reason: string, expires: string, actor: Actor): Promise<Anchor>;
 export declare function unlink(repoRoot: string, anchorId: string): Promise<void>;
 export declare function refs(repoRoot: string, path: string, symbol?: string): Promise<Anchor[]>;

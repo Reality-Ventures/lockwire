@@ -8,9 +8,13 @@ import { fingerprint, fingerprintSet } from "./hash.js";
 import { appendEvent, historyFor, readLedger } from "./ledger.js";
 import { anchorsForPath, lockfilePath, newAnchorId, readLockfile, removeAnchor, upsertAnchor, writeFileAtomic, writeLockfile, } from "./lockfile.js";
 import { claimUnchanged, retargetMarkerLine, scanMarkers, stampMarkerLine, } from "./markers.js";
+import { SourceIndex, sigFingerprints } from "./moves.js";
+import { extractReExports, NO_REEXPORTS, resolveModule } from "./reexports.js";
 import { canonicalDocPath, globToRegExp, isScannedDoc, matchesAny, outsideRepoMessage, resolveInsideRepo, stripBom, walkFiles, } from "./repo.js";
 import { ALL_TIERS, tierFingerprint } from "./types.js";
 import { checkClaimAgainstValue, dataFormatOf, resolveValue, valueFingerprintInput, wholeFileContent, } from "./values.js";
+/** How many re-exports deep `resolveTarget` follows a name before giving up (`a` → `b` → `c` …). */
+const MAX_REEXPORT_HOPS = 8;
 /** The fingerprint version an anchor was stamped with (anchors from before versions are version 1). */
 export const versionOf = (anchor) => anchor.fingerprintVersion ?? 1;
 /**
@@ -23,7 +27,83 @@ export async function resolveTarget(repoRoot, target, config, version = FINGERPR
         throw new Error(outsideRepoMessage(target.path));
     if (!existsSync(absPath))
         return null;
-    return resolveTargetInText(target, await readFile(absPath, "utf8"), config, version);
+    const here = await resolveTargetInText(target, await readFile(absPath, "utf8"), config, version);
+    if (here.found || !target.symbol || !here.reExports)
+        return here;
+    const via = await followReExport(repoRoot, target, here.reExports, config, version, [
+        target.path,
+    ]);
+    if (!via)
+        return here;
+    // Bound to the old path: `path` stays that path's, and the claim keeps the name it was stamped under.
+    return { ...via, fingerprints: { ...via.fingerprints, path: here.fingerprints.path } };
+}
+/**
+ * The symbol a file doesn't define but re-exports, resolved where it is defined, with its `sig`
+ * rendered under the name the target asks for (`export { fooV2 as foo }` answers for `foo`).
+ * `seen` is the chain so far, so a re-export cycle ends instead of looping.
+ */
+async function followReExport(repoRoot, target, reExports, config, version, seen) {
+    const symbol = target.symbol;
+    if (!symbol || seen.length > MAX_REEXPORT_HOPS)
+        return null;
+    const dot = symbol.indexOf(".");
+    const head = dot < 0 ? symbol : symbol.slice(0, dot);
+    const rest = dot < 0 ? "" : symbol.slice(dot + 1);
+    const routes = [];
+    for (const r of reExports.named) {
+        if (r.name !== head || r.imported === "default")
+            continue;
+        if (r.imported === "*") {
+            if (rest)
+                routes.push({ from: r.from, symbol: rest }); // `ns.foo` through `export * as ns`
+        }
+        else
+            routes.push({ from: r.from, symbol: rest ? `${r.imported}.${rest}` : r.imported });
+    }
+    for (const from of reExports.star)
+        routes.push({ from, symbol });
+    for (const route of routes) {
+        const file = resolveModule(repoRoot, target.path, route.from);
+        if (!file || seen.includes(file))
+            continue;
+        const abs = resolveInsideRepo(repoRoot, file);
+        if (!abs)
+            continue;
+        let there;
+        try {
+            there = await resolveTargetInText({ path: file, symbol: route.symbol }, await readFile(abs, "utf8"), config, version);
+        }
+        catch {
+            continue;
+        }
+        if (!there.found) {
+            if (!there.reExports)
+                continue;
+            const deeper = await followReExport(repoRoot, { path: file, symbol: route.symbol }, there.reExports, config, version, [...seen, file]);
+            if (deeper)
+                return renamedAs(deeper, symbol, route.symbol);
+            continue;
+        }
+        return renamedAs({ ...there, definedAt: { path: file, symbol: route.symbol } }, symbol, route.symbol);
+    }
+    return null;
+}
+/** A re-exported symbol's `sig` under the name it is asked for, when an alias renamed it on the way. */
+function renamedAs(r, asked, defined) {
+    const name = (p) => p.slice(p.lastIndexOf(".") + 1);
+    if (name(asked) === name(defined))
+        return r;
+    const def = r.symbols?.bySymbolPath.get(r.definedAt?.symbol ?? defined);
+    const sig = def?.sigFor?.(name(asked));
+    return sig ? { ...r, fingerprints: { ...r.fingerprints, sig: fingerprint(sig) } } : r;
+}
+/** A source file's symbols, parsed (or served from the parse cache) the way `version` reads them. */
+export async function symbolsOfSource(path, content, config, version = FINGERPRINT_VERSION) {
+    const lang = langForPath(path);
+    if (!lang)
+        return null;
+    return (await parseSource(path, content, lang, config, version, false)).symbols;
 }
 /**
  * {@link resolveTarget} on given file contents rather than the file on disk — used to fingerprint a
@@ -62,7 +142,12 @@ export async function resolveTargetInText(target, content, config, version = FIN
     if (target.symbol) {
         const symbol = symbols.bySymbolPath.get(target.symbol);
         if (!symbol)
-            return { found: false, fingerprints: { path: pathFp, sig: "", body: "", deps: "" }, symbols };
+            return {
+                found: false,
+                fingerprints: { path: pathFp, sig: "", body: "", deps: "" },
+                symbols,
+                reExports: parsed.reExports,
+            };
         return {
             found: true,
             fingerprints: {
@@ -113,6 +198,9 @@ async function parseSource(path, content, lang, config, version, needWhole) {
             symbols: hit?.content === content
                 ? hit.symbols
                 : extractFileSymbols(tree.rootNode, lang, config.normalizeLocals, version),
+            reExports: hit?.content === content
+                ? hit.reExports
+                : safeReExports(() => extractReExports(tree.rootNode, lang)),
             ...(needWhole
                 ? { whole: computeWholeFileTiers(tree.rootNode, lang, config.normalizeLocals, version) }
                 : {}),
@@ -130,13 +218,22 @@ async function parseSource(path, content, lang, config, version, needWhole) {
     }
     return parsed;
 }
+/** Re-exports are a convenience on top of resolution: a form this reader trips on just isn't followed. */
+function safeReExports(read) {
+    try {
+        return read();
+    }
+    catch {
+        return NO_REEXPORTS;
+    }
+}
 /**
  * Same-file rename detection: if a symbol vanished but exactly one other symbol in the file has the
  * same signature apart from its name, relink to it. `sig` fingerprints include the symbol's name,
  * so each candidate is re-rendered under the missing symbol's old name before comparing -- that
  * keeps stored fingerprints valid. Symbols already bound by another anchor are skipped, so an
- * unrelated neighbour with the same shape isn't mistaken for the rename target. Cross-file
- * relocation (the symbol moved to a different file) is not attempted in P0 — see docs/concepts.md limitations.
+ * unrelated neighbour with the same shape isn't mistaken for the rename target. A symbol moved to a
+ * different file is found by `SourceIndex.findMove` (moves.ts) and re-pointed by {@link repoint}.
  */
 export function findRelocationCandidate(symbols, missingSigFp, oldName, taken = new Set(), 
 /**
@@ -587,6 +684,16 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
     let current = lockfile;
     let relocatedCount = 0;
     const markersIn = markerReader(repoRoot);
+    const moveSearchMs = opts.moveSearchMs ?? Number.POSITIVE_INFINITY;
+    let sources;
+    /** Where an anchor's code as stamped lives now, if it moved to another file. */
+    const movedOf = async (a) => {
+        if (!a.target.symbol || moveSearchMs <= 0)
+            return {};
+        sources ??= new SourceIndex(repoRoot, config, (path, content, version) => symbolsOfSource(path, content, config, version), Date.now() + moveSearchMs);
+        const hint = await sources.findMove(a, versionOf(a));
+        return hint ? { moved: hint } : {};
+    };
     for (const stored of lockfile.anchors) {
         let anchor = stored;
         const inScope = !onlyPaths ||
@@ -666,11 +773,13 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
         }
         let resolved;
         let unresolvedNote = "file not found";
+        let unreadable = false;
         try {
             resolved = await resolveTarget(repoRoot, anchor.target, config, versionOf(anchor));
         }
         catch (err) {
             resolved = null;
+            unreadable = true;
             unresolvedNote = err instanceof Error ? err.message : String(err);
         }
         if (!resolved) {
@@ -690,6 +799,7 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
                 anchor: orphaned,
                 status: "orphaned",
                 driftedTiers: [],
+                ...(unreadable ? {} : await movedOf(anchor)),
                 singleHashWouldFlag: true,
             });
             continue;
@@ -770,11 +880,13 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
                     anchor: orphaned,
                     status: "orphaned",
                     driftedTiers: [],
+                    ...(await movedOf(anchor)),
                     singleHashWouldFlag: true,
                 });
             }
             continue;
         }
+        const definedAt = resolved.definedAt ? { definedAt: resolved.definedAt } : {};
         const nowFingerprints = resolved.fingerprints;
         const moved = (t) => tierFingerprint(nowFingerprints, t) !== tierFingerprint(anchor.fingerprints, t);
         let driftedTiers = anchor.tiers.filter(moved);
@@ -842,12 +954,17 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
                     });
                 }
             }
+            // The code here changed: maybe it was moved out, unchanged, and something else left in its place
+            // (a wrapper kept for compatibility).
+            const movedOut = anyTierChanged.includes("body") ? await movedOf(anchor) : {};
             results.push({
                 anchor: drifted,
                 status: "drifted",
                 driftedTiers,
                 ...(claimChanged ? { claimChanged } : {}),
                 ...(valueReport ? { value: valueReport } : {}),
+                ...movedOut,
+                ...definedAt,
                 singleHashWouldFlag: anyTierChanged.length > 0,
             });
         }
@@ -881,6 +998,7 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
                     anchor: resolvedAnchor,
                     status: "fresh",
                     driftedTiers: [],
+                    ...definedAt,
                     singleHashWouldFlag: false,
                 });
             }
@@ -889,6 +1007,7 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
                     anchor,
                     status: anchor.status,
                     driftedTiers: [],
+                    ...definedAt,
                     singleHashWouldFlag: anyTierChanged.length > 0,
                 });
             }
@@ -922,6 +1041,7 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
         orphaned: examined.filter((r) => r.status === "orphaned").length,
         waived: examined.filter((r) => r.status === "waived").length,
         superseded: examined.filter((r) => r.status === "superseded").length,
+        moved: examined.filter((r) => r.moved?.to).length,
         unlinked: unlinked.length,
         noise: { singleHashWouldFlag, tieredFlagged, reductionPercent },
     };
@@ -985,6 +1105,215 @@ export async function ack(repoRoot, anchorId, resolution, note, actor, config) {
         note: note ?? resolution,
     });
     return updated;
+}
+const targetLabel = (t) => `${t.path}${t.symbol ? `#${t.symbol}` : ""}`;
+/**
+ * `lockwire repoint`: move claims whose code moved to another file over to its new home, rewriting
+ * each doc marker to match. With no `to`, the new home is where `check` found the symbol's code as
+ * stamped (only when there is exactly one such place); `ids` limits it to those anchors. With `to`
+ * (and one id), it is that target, for a move lockwire couldn't place on its own.
+ *
+ * The path changes by definition, and so may `export` on the signature (a helper moved into a module
+ * of its own is usually exported now). Any other bound tier that differs at the new place is drift and
+ * stays drift, unless `reviewed` says a person checked the claim against the code there.
+ */
+export async function repoint(repoRoot, config, actor, opts = {}) {
+    if (opts.to && opts.ids?.length !== 1)
+        throw new Error("--to names one new home: pass exactly one anchor id with it");
+    const lockfile = await readLockfile(repoRoot);
+    const result = { repointed: [], skipped: [] };
+    const byId = new Map(lockfile.anchors.map((a) => [a.id, a]));
+    for (const id of opts.ids ?? [])
+        if (!byId.has(id))
+            result.skipped.push({ id, target: "-", reason: `no anchor ${id}` });
+    const plan = [];
+    const wanted = opts.ids ? opts.ids.filter((id) => byId.has(id)) : null;
+    const only = wanted?.[0] ? byId.get(wanted[0]) : undefined;
+    if (opts.to && only)
+        plan.push({ anchor: only, to: opts.to });
+    else if (!opts.to && (!wanted || wanted.length > 0)) {
+        const scope = wanted
+            ? [
+                ...new Set(wanted.flatMap((id) => {
+                    const a = byId.get(id);
+                    return a ? [a.target.path, ...(a.doc ? [a.doc] : [])] : [];
+                })),
+            ]
+            : undefined;
+        const checked = await check(repoRoot, config, scope, { write: false });
+        for (const r of checked.results) {
+            if (r.skipped || (wanted && !wanted.includes(r.anchor.id)))
+                continue;
+            const stored = byId.get(r.anchor.id);
+            if (!stored)
+                continue;
+            if (r.moved?.to) {
+                plan.push({ anchor: stored, to: r.moved.to });
+                continue;
+            }
+            if (!wanted)
+                continue;
+            result.skipped.push({
+                id: stored.id,
+                target: targetLabel(stored.target),
+                reason: r.moved?.candidates.length
+                    ? `its code is in ${r.moved.candidates.length} places (${r.moved.candidates.map(targetLabel).join(", ")}): pass --to <path#symbol> to choose`
+                    : r.status === "waived"
+                        ? "waived: check doesn't look for its code until the waiver expires; pass --to <path#symbol> to re-point it now"
+                        : r.status === "fresh"
+                            ? "nothing to re-point: it still resolves where it is"
+                            : stored.target.symbol
+                                ? "no other file has its code as stamped: if it moved and changed, pass --to <path#symbol>"
+                                : "lockwire only finds moved symbols: pass --to <path> for a file that moved",
+            });
+        }
+    }
+    let current = lockfile;
+    const now = new Date().toISOString();
+    const markerEdits = new Map();
+    const outcomes = [];
+    for (const { anchor, to } of plan) {
+        const skip = (reason) => result.skipped.push({ id: anchor.id, target: targetLabel(anchor.target), reason });
+        if (anchor.status === "superseded") {
+            skip("superseded: its claim no longer applies, so there is nothing to re-point");
+            continue;
+        }
+        if (to.path === anchor.target.path && to.symbol === anchor.target.symbol) {
+            skip(`already points at ${targetLabel(to)}`);
+            continue;
+        }
+        if (Boolean(to.symbol) !== Boolean(anchor.target.symbol)) {
+            skip(anchor.target.symbol
+                ? `a claim about a symbol re-points to a symbol: use ${to.path}#<symbol>`
+                : "a claim about a whole file re-points to a file, not a symbol");
+            continue;
+        }
+        const tierProblem = inapplicableTiersReason(to, anchor.tiers);
+        if (tierProblem) {
+            skip(tierProblem);
+            continue;
+        }
+        let there = null;
+        try {
+            there = await resolveTarget(repoRoot, to, config, versionOf(anchor));
+        }
+        catch (err) {
+            skip(err instanceof Error ? err.message : String(err));
+            continue;
+        }
+        if (!there?.found) {
+            skip(`${targetLabel(to)} not found`);
+            continue;
+        }
+        // `sig` carries the symbol's name and `export`: compare it as the old name would read, either way.
+        const def = to.symbol
+            ? there.symbols?.bySymbolPath.get(there.definedAt?.symbol ?? to.symbol)
+            : undefined;
+        const oldName = (anchor.target.symbol ?? "").slice((anchor.target.symbol ?? "").lastIndexOf(".") + 1);
+        const sigMatches = def
+            ? sigFingerprints(def.sigFor?.(oldName) ?? def.sigTokens).has(anchor.fingerprints.sig)
+            : there.fingerprints.sig === anchor.fingerprints.sig;
+        const driftedTiers = anchor.tiers.filter((t) => t === "path"
+            ? false
+            : t === "sig"
+                ? !sigMatches
+                : tierFingerprint(there.fingerprints, t) !== tierFingerprint(anchor.fingerprints, t));
+        let fingerprints = there.fingerprints;
+        let fingerprintVersion = versionOf(anchor);
+        let status = anchor.status === "waived" ? "waived" : "fresh";
+        if (opts.reviewed && driftedTiers.length > 0) {
+            const restamp = await resolveTarget(repoRoot, to, config).catch(() => null);
+            if (restamp?.found) {
+                fingerprints = restamp.fingerprints;
+                fingerprintVersion = FINGERPRINT_VERSION;
+            }
+        }
+        else if (driftedTiers.length > 0) {
+            fingerprints = { ...there.fingerprints };
+            for (const t of driftedTiers)
+                fingerprints[t] = tierFingerprint(anchor.fingerprints, t);
+            if (status !== "waived")
+                status = "drifted";
+        }
+        const updated = {
+            ...anchor,
+            target: to,
+            fingerprints,
+            fingerprintVersion,
+            status,
+            ...(there.value ? { value: there.value.display } : {}),
+        };
+        current = upsertAnchor(current, updated);
+        if (anchor.doc && anchor.claim) {
+            const list = markerEdits.get(anchor.doc) ?? [];
+            list.push({ id: anchor.id, to });
+            markerEdits.set(anchor.doc, list);
+        }
+        outcomes.push({
+            id: anchor.id,
+            doc: anchor.doc,
+            from: anchor.target,
+            to,
+            status,
+            driftedTiers: opts.reviewed ? [] : driftedTiers,
+            markerUpdated: false,
+            claimNamesOldPath: false,
+        });
+    }
+    // Each doc is read and written once, however many of its markers moved.
+    for (const [doc, edits] of markerEdits) {
+        const abs = resolveInsideRepo(repoRoot, doc);
+        if (!abs || !existsSync(abs))
+            continue;
+        const text = await readFile(abs, "utf8");
+        const markers = scanMarkers(text);
+        const parts = text.split(/(\r?\n)/);
+        let changed = false;
+        for (const edit of edits) {
+            const marker = markers.find((m) => m.id === edit.id);
+            const outcome = outcomes.find((o) => o.id === edit.id);
+            if (!marker || !outcome)
+                continue;
+            const idx = (marker.line - 1) * 2;
+            const line = parts[idx];
+            if (line === undefined)
+                continue;
+            parts[idx] = retargetMarkerLine(line, edit.to);
+            changed = true;
+            outcome.markerUpdated = true;
+            outcome.claimNamesOldPath = marker.claimText.includes(outcome.from.path);
+        }
+        if (changed && !opts.dryRun)
+            await writeFileAtomic(abs, parts.join(""));
+    }
+    if (!opts.dryRun && outcomes.length > 0) {
+        await writeLockfile(repoRoot, current);
+        const commit = headCommit(repoRoot);
+        for (const o of outcomes) {
+            await appendEvent(repoRoot, {
+                ts: now,
+                event: "anchor.relocated",
+                anchor: o.id,
+                actor,
+                commit,
+                note: `${targetLabel(o.from)} -> ${targetLabel(o.to)} (moved; re-pointed${opts.reviewed ? ", reviewed" : ""})`,
+            });
+            const stored = byId.get(o.id);
+            for (const tier of o.driftedTiers)
+                await appendEvent(repoRoot, {
+                    ts: now,
+                    event: "anchor.drifted",
+                    anchor: o.id,
+                    actor,
+                    commit,
+                    tier,
+                    from: stored ? tierFingerprint(stored.fingerprints, tier) : "",
+                    note: `differs at ${targetLabel(o.to)}`,
+                });
+        }
+    }
+    result.repointed = outcomes;
+    return result;
 }
 export async function waive(repoRoot, anchorId, reason, expires, actor) {
     const expiresAt = Date.parse(expires);

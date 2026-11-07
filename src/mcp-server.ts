@@ -9,6 +9,7 @@ import {
   type IndexSession,
   linkDoc,
   refs,
+  repoint,
   status,
   unlinkedFor,
   waive,
@@ -259,6 +260,49 @@ export function createServer(
       text(
         await withRepoLock(repoRoot, () => waive(repoRoot, anchor, reason, expires, agentActor())),
       ),
+  );
+
+  server.registerTool(
+    "lockwire_repoint",
+    {
+      title: "Re-point moved claims",
+      description:
+        "After moving code to another file: point every claim whose symbol moved there, unchanged, at its new path#symbol and rewrite its doc marker. `anchors` limits it to those ids; `to` (with one id) names the new home when lockwire found the code in several places or it changed on the way. A bound tier that differs at the new place stays drifted. `dryRun` reports what would change without writing.",
+      inputSchema: {
+        anchors: z.array(z.string()).optional(),
+        to: z.string().optional(),
+        dryRun: z.boolean().optional(),
+      },
+      // Re-pointing an anchor that already points at its new home skips it, so a repeat call with
+      // nothing moved in between writes nothing.
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ anchors, to, dryRun }) => {
+      const note = missingLockNote(repoRoot);
+      if (note) return text(note);
+      const hash = to?.indexOf("#") ?? -1;
+      const target = to
+        ? {
+            path: toRepoPath(repoRoot, hash < 0 ? to : to.slice(0, hash), repoRoot),
+            ...(hash >= 0 && to.slice(hash + 1) ? { symbol: to.slice(hash + 1) } : {}),
+          }
+        : undefined;
+      const config = await readConfig(repoRoot);
+      return text(
+        await withRepoLock(repoRoot, () =>
+          repoint(repoRoot, config, agentActor(), {
+            ...(anchors ? { ids: anchors } : {}),
+            ...(target ? { to: target } : {}),
+            dryRun: Boolean(dryRun),
+          }),
+        ),
+      );
+    },
   );
 
   // ---- The agent work queue: what's wrong, the context to fix it, and a checked resolve. ----------

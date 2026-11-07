@@ -109,6 +109,7 @@ Any agent that reads `npx skills add`-style skills (Cursor, Gemini CLI, OpenCode
 | `lockwire_tasks` | `paths?`, `changed?` | The work queue: every claim that needs attention, as a task saying what is wrong and what to do. Read-only. |
 | `lockwire_task_context` | `id` | One task in full: the whole claim, the bound code or value as stamped and as it is now, and the claim's history. Read-only. |
 | `lockwire_resolve` | `id`, `note?` | After editing the doc, re-stamp that one claim — checked first, refused (with the reason) if it still doesn't hold. |
+| `lockwire_repoint` | `anchors?`, `to?`, `dryRun?` | After moving code to another file: point each claim whose symbol moved there unchanged at its new `path#symbol` and rewrite its marker. `to` (with one anchor) picks the new home when the code is in several places. A bound tier that differs there stays drifted. |
 
 The server also offers a **`fix-docs` prompt** (optional `scope`) that walks an agent through the loop below.
 
@@ -124,7 +125,7 @@ lockwire has no model of its own and never writes a sentence. It tells the agent
    | `value-wrong` | A number (or string) in the sentence no longer matches the value it's bound to. |
    | `value-changed` | A bound value moved and the sentence states nothing lockwire can compare it with. |
    | `claim-edited` | Someone reworded the claim; the code didn't move. |
-   | `target-missing` | The bound symbol, key or file is gone (or outside the repository). |
+   | `target-missing` | The bound symbol, key or file is gone (or outside the repository). When its code moved unchanged to another file, the summary says where and the first resolution is `lockwire_repoint`. |
    | `marker-removed` | The marker was deleted from the doc. |
    | `unlinked` | A marker nobody has linked: nothing is checking the claim under it. Its id is `unlinked:<doc>:<marker line>:<key>`, where the key is a hash of the marker's target and claim — so the id still finds the marker after lines above it move, and never lands on a different marker that has taken its line. |
 

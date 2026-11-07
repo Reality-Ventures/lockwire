@@ -129,6 +129,7 @@ stateDiagram-v2
     Waived --> Drifted: waiver expires, something moved<br/><i>waiver.expired</i>
 
     Orphaned --> Fresh: marker or symbol restored,<br/>then link (--reviewed if the code changed)
+    Orphaned --> Fresh: code moved unchanged to another file,<br/>lockwire repoint<br/><i>anchor.relocated</i>
 
     Superseded --> [*]
 
@@ -136,9 +137,10 @@ stateDiagram-v2
         Relocation is an event, not a state: after a
         rename the anchor is just fresh (or drifted,
         if a bound tier also moved) under its new
-        name. Same-file renames only in P0; a symbol
-        moved to another file reports orphaned — see
-        docs/concepts.md limitations.
+        name. A symbol moved to another file reports
+        orphaned with where its code went, and
+        lockwire repoint re-points it — see
+        docs/concepts.md, moved code.
     end note
 ```
 
@@ -305,7 +307,7 @@ See [docs/autofix.md](docs/autofix.md).
 
 ## What lockwire does not do
 
-Hashes cannot catch semantic drift — a doc saying "we use Redux" when the code moved to Zustand, where every file path still resolves and no signature changed. Catching that requires reasoning about meaning, not fingerprints; [ClaudeDrift](https://github.com/marky291/claude-drift) does this well as an on-demand, LLM-reasoning layer, and pairs naturally with lockwire's continuous, deterministic one — see [docs/comparison.md](docs/comparison.md). Numbers are the exception: a sentence bound to the value it came from — a JSON key or a LaTeX macro a pipeline writes — is checked against that value at the precision it states, so "the lower bound is 0.18" is flagged when a rerun makes it 0.19, and not when it makes it 0.1791 ([docs/concepts.md](docs/concepts.md#numbers-and-other-values)). P0 supports TypeScript, TSX, JavaScript, and Python source, and values in JSON and LaTeX files; cross-file rename detection, a resolver agent, and semantic-claim extraction are roadmap, not shipped — see [docs/concepts.md](docs/concepts.md#limitations-read-before-relying-on-this-in-production).
+Hashes cannot catch semantic drift — a doc saying "we use Redux" when the code moved to Zustand, where every file path still resolves and no signature changed. Catching that requires reasoning about meaning, not fingerprints; [ClaudeDrift](https://github.com/marky291/claude-drift) does this well as an on-demand, LLM-reasoning layer, and pairs naturally with lockwire's continuous, deterministic one — see [docs/comparison.md](docs/comparison.md). Numbers are the exception: a sentence bound to the value it came from — a JSON key or a LaTeX macro a pipeline writes — is checked against that value at the precision it states, so "the lower bound is 0.18" is flagged when a rerun makes it 0.19, and not when it makes it 0.1791 ([docs/concepts.md](docs/concepts.md#numbers-and-other-values)). P0 supports TypeScript, TSX, JavaScript, and Python source, and values in JSON and LaTeX files. Code that moves to another file is found and re-pointed with `lockwire repoint`, and a name re-exported from its old path keeps resolving ([docs/concepts.md](docs/concepts.md#moved-code-and-re-exports)); a move that also renames the symbol, a resolver agent, and semantic-claim extraction are roadmap, not shipped — see [docs/concepts.md](docs/concepts.md#limitations-read-before-relying-on-this-in-production).
 
 ## FAQ
 

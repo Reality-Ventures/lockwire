@@ -48,6 +48,10 @@ After an edit, if `additionalContext` says a claim drifted:
 3. If the claim doesn't apply anymore, run `lockwire ack <id> --resolution superseded --note "..."` instead of rewriting it.
 4. If this is a known, temporary, acceptable drift, run `lockwire waive <id> --reason "..." --expires YYYY-MM-DD` rather than ignoring it — waivers are logged and expire; silence is not an option lockwire gives you.
 
+## When you move code to another file
+
+Claims are bound to `path#symbol`. After moving a function or class, run `lockwire check`: claims whose code moved unchanged say `moved to <new path#symbol>`, and `lockwire repoint` points them (and their markers) there in one step. Keeping the old name importable from the old file (`export { foo } from "./new"`, `from .new import foo`) also works: the claim follows the re-export. If the sentence names the old file, fix that wording yourself.
+
 ## Checking before you commit
 
 ```bash

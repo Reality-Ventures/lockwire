@@ -11,7 +11,21 @@ export function describeDrift(r) {
         parts.push(`claim says ${v.claimed.length ? v.claimed.join(", ") : "otherwise"}, value is ${v.now}${v.was && v.was !== v.now ? ` (was ${v.was})` : ""}`);
     else if (v || r.driftedTiers.includes("value"))
         parts.push(v?.was !== undefined ? `value: ${v.was} -> ${v?.now}` : `value${v ? `: now ${v.now}` : ""}`);
+    const moved = describeMove(r.moved);
+    if (moved)
+        parts.push(moved);
     return parts.join(", ");
+}
+const label = (t) => `${t.path}${t.symbol ? `#${t.symbol}` : ""}`;
+/** `moved to src/new.ts#foo`, or where its code was found when lockwire can't tell which place is the claim's. */
+export function describeMove(moved) {
+    if (!moved)
+        return "";
+    if (moved.to)
+        return `moved to ${label(moved.to)}`;
+    const shown = moved.candidates.slice(0, 3).map(label).join(", ");
+    const more = moved.candidates.length > 3 ? `, +${moved.candidates.length - 3} more` : "";
+    return `its code is in ${moved.candidates.length} places: ${shown}${more}`;
 }
 const VERSION = "0.1.0";
 export function formatText(result) {
@@ -52,6 +66,15 @@ export function formatText(result) {
             lines.push("Fix the target of each marker whose file doesn't exist, then link.");
         lines.push("");
     }
+    const moved = result.results.filter((r) => !r.skipped && r.moved);
+    if (moved.length > 0) {
+        const placed = moved.filter((r) => r.moved?.to).length;
+        if (placed > 0)
+            lines.push(`${placed} claim${placed === 1 ? "'s" : "s'"} code moved to another file unchanged: run \`lockwire repoint\` to re-point ${placed === 1 ? "it" : "them"} and update the markers.`);
+        if (placed < moved.length)
+            lines.push("Where the code is in several places, choose one: `lockwire repoint <id> --to <path#symbol>`.");
+        lines.push("");
+    }
     const { summary } = result;
     lines.push(`${summary.anchors} anchor${summary.anchors === 1 ? "" : "s"} · ${summary.fresh} ok · ${summary.drifted} drifted · ${summary.orphaned} orphaned${summary.relocated > 0 ? ` · ${summary.relocated} relocated` : ""}${summary.unlinked > 0 ? ` · ${summary.unlinked} unlinked` : ""}`);
     lines.push(`single-hash would flag ${summary.noise.singleHashWouldFlag} · lockwire flagged ${summary.noise.tieredFlagged} · noise −${summary.noise.reductionPercent}%`);
@@ -75,6 +98,8 @@ export function formatJson(result, repo) {
             driftedTiers: r.driftedTiers,
             claimChanged: r.claimChanged ?? false,
             value: r.value ?? null,
+            moved: r.moved ?? null,
+            definedAt: r.definedAt ?? null,
             excerpt: r.anchor.claim?.excerpt ?? null,
         })),
         unlinked: result.unlinked,
@@ -90,15 +115,17 @@ export function formatGithub(result, opts = {}) {
         const file = r.anchor.doc ?? r.anchor.target.path;
         const line = r.anchor.claim?.line ?? 1;
         const what = describeDrift(r);
-        const message = r.status === "orphaned"
-            ? r.claimChanged
-                ? `lockwire: the claim bound to "${target}" was removed from the doc — unlink it or restore the marker`
-                : `lockwire: "${target}" no longer exists — this claim is orphaned`
-            : r.value && !r.value.matches
-                ? `lockwire: this claim is wrong now — it states ${r.value.claimed.join(", ") || "a different value"}, but "${target}" is ${r.value.now}`
-                : r.claimChanged && r.driftedTiers.length === 0
-                    ? `lockwire: the claim text bound to "${target}" was edited — re-verify it against the code, then run lockwire link`
-                    : `lockwire: "${target}" drifted on ${what} — this claim may be stale`;
+        const message = r.moved?.to
+            ? `lockwire: the code "${target}" names moved to "${label(r.moved.to)}" — run lockwire repoint ${r.anchor.id}`
+            : r.status === "orphaned"
+                ? r.claimChanged
+                    ? `lockwire: the claim bound to "${target}" was removed from the doc — unlink it or restore the marker`
+                    : `lockwire: "${target}" no longer exists — this claim is orphaned${r.moved ? ` (${describeMove(r.moved)})` : ""}`
+                : r.value && !r.value.matches
+                    ? `lockwire: this claim is wrong now — it states ${r.value.claimed.join(", ") || "a different value"}, but "${target}" is ${r.value.now}`
+                    : r.claimChanged && r.driftedTiers.length === 0
+                        ? `lockwire: the claim text bound to "${target}" was edited — re-verify it against the code, then run lockwire link`
+                        : `lockwire: "${target}" drifted on ${what} — this claim may be stale`;
         lines.push(`::error file=${file},line=${line}::${message}`);
     }
     for (const u of result.unlinked) {

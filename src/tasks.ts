@@ -12,7 +12,15 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import type { AnchorCheckResult, UnlinkedMarker } from "./actions.js";
-import { ack, check, linkDoc, markerReader, resolveTargetInText, versionOf } from "./actions.js";
+import {
+  ack,
+  check,
+  linkDoc,
+  markerReader,
+  resolveTarget,
+  resolveTargetInText,
+  versionOf,
+} from "./actions.js";
 import { commitsTouching, fileAtCommit } from "./changed.js";
 import { describeDrift } from "./format.js";
 import { fingerprint } from "./hash.js";
@@ -103,9 +111,26 @@ const RESOLUTIONS: Record<TaskKind, string[]> = {
   ],
 };
 
+/** The usual resolutions, with re-pointing first when the claim's code moved to another file. */
+function resolutionsOf(kind: TaskKind, r: AnchorCheckResult): string[] {
+  const to = r.moved?.to;
+  if (to)
+    return [
+      `The code this claim describes moved, unchanged, to ${label(to)}: call lockwire_repoint for this anchor to point the claim and its marker there. If the sentence names the old file, fix that wording too.`,
+      ...RESOLUTIONS[kind],
+    ];
+  if (r.moved)
+    return [
+      `The code this claim describes is now in several places (${r.moved.candidates.map(label).join(", ")}): pick the one the claim is about and call lockwire_repoint with it as \`to\`.`,
+      ...RESOLUTIONS[kind],
+    ];
+  return RESOLUTIONS[kind];
+}
+
 function summaryOf(kind: TaskKind, r: AnchorCheckResult): string {
   const target = label(r.anchor.target);
   const what = describeDrift(r);
+  if (r.moved?.to) return `${target} moved to ${label(r.moved.to)}`;
   switch (kind) {
     case "value-wrong":
       return `the claim says ${r.value?.claimed.join(", ") || "something else"} but ${target} is ${r.value?.now}`;
@@ -191,7 +216,7 @@ export async function listTasks(
       claim: marker?.claimExcerpt ?? r.anchor.claim?.excerpt ?? null,
       target: label(r.anchor.target),
       summary: summaryOf(kind, r),
-      resolutions: RESOLUTIONS[kind],
+      resolutions: resolutionsOf(kind, r),
     });
   }
   for (const u of result.unlinked) {
@@ -281,9 +306,16 @@ async function snapshotNow(
   if (!abs) return { source: null, note: "outside the repository" };
   if (!existsSync(abs)) return { source: null, note: `${target.path} does not exist` };
   try {
-    const r = await resolveTargetInText(target, await readFile(abs, "utf8"), config);
-    if (!r.found) return { source: null, note: `${label(target)} was not found in ${target.path}` };
-    return cap(r.source ?? "");
+    // Through re-exports, as `check` resolves it: a name kept at the old path shows the code it stands for.
+    const r = await resolveTarget(repoRoot, target, config);
+    if (!r?.found)
+      return { source: null, note: `${label(target)} was not found in ${target.path}` };
+    return {
+      ...cap(r.source ?? ""),
+      ...(r.definedAt
+        ? { note: `defined in ${label(r.definedAt)}, re-exported from ${target.path}` }
+        : {}),
+    };
   } catch (err) {
     return { source: null, note: err instanceof Error ? err.message : String(err) };
   }

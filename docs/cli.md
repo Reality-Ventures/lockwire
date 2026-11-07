@@ -88,7 +88,7 @@ single-hash would flag 3 · lockwire flagged 1 · noise −66.7%
 
 `singleHashWouldFlag` counts anchors where *any* of the four tiers changed, regardless of what's bound — an approximation of what a single-hash tool would report. `tieredFlagged` counts anchors where a *bound* tier changed. The gap between them is the false-positive reduction tiering buys you.
 
-`value` is `null` except on a [value anchor](concepts.md#numbers-and-other-values) whose value moved or no longer matches its sentence, where it is `{ "was": "0.1834", "now": "0.1912", "claimed": ["0.18"], "matches": false }`: the value when stamped, the value now, the numbers the sentence states, and whether it still holds. `claimChanged` is true when the claim sentence was edited (status `drifted`, `driftedTiers` empty) or its marker was removed (status `orphaned`). A path-scoped run lists only the anchors it examined, and `summary` counts only those. The JSON output follows schema `lockwire.check.v1`:
+`moved` is `null` unless the bound symbol's code as stamped turned up in another file — on an `orphaned` anchor, or a `drifted` one whose code changed where it was (a wrapper left behind) — where it is `{ "to": { "path": "src/retry/delay.ts", "symbol": "retryDelay" }, "candidates": [ … ] }`: `to` is the one place it went, absent when it is in several (`candidates` lists them all), and `summary.moved` counts the anchors with a `to`. `definedAt` is `null` unless the target's file only re-exports the symbol, where it names the file and symbol that really define it (see [moved code](concepts.md#moved-code-and-re-exports)). `value` is `null` except on a [value anchor](concepts.md#numbers-and-other-values) whose value moved or no longer matches its sentence, where it is `{ "was": "0.1834", "now": "0.1912", "claimed": ["0.18"], "matches": false }`: the value when stamped, the value now, the numbers the sentence states, and whether it still holds. `claimChanged` is true when the claim sentence was edited (status `drifted`, `driftedTiers` empty) or its marker was removed (status `orphaned`). A path-scoped run lists only the anchors it examined, and `summary` counts only those. The JSON output follows schema `lockwire.check.v1`:
 
 ```json
 {
@@ -98,12 +98,13 @@ single-hash would flag 3 · lockwire flagged 1 · noise −66.7%
   "checkedAt": "2026-09-25T10:00:00Z",
   "summary": {
     "anchors": 41, "fresh": 38, "drifted": 2, "relocated": 0, "orphaned": 1, "waived": 0, "superseded": 0,
-    "unlinked": 1,
+    "moved": 1, "unlinked": 1,
     "noise": { "singleHashWouldFlag": 14, "tieredFlagged": 3, "reductionPercent": 78.6 }
   },
   "anchors": [
     { "id": "k7q2m9xv", "doc": "CLAUDE.md", "line": 3, "target": "src/auth/session.ts#createSession",
       "status": "drifted", "driftedTiers": ["sig"], "claimChanged": false, "value": null,
+      "moved": null, "definedAt": null,
       "excerpt": "`createSession` takes a `UserId`…" }
   ],
   "unlinked": [
@@ -111,6 +112,22 @@ single-hash would flag 3 · lockwire flagged 1 · noise −66.7%
       "excerpt": "`createSession` takes a `UserId`…" }
   ]
 }
+```
+
+## `lockwire repoint [ids…] [--to <path#symbol>] [--reviewed] [--dry-run] [--json]`
+
+Re-points claims whose code moved to another file, and rewrites each doc marker to name the new place (keeping its tiers and id), in one step. With no ids it re-points every anchor `check` found a single new home for (`moved to …` in its report); with ids, just those, saying why for any it can't. `--to` (with exactly one id) names the new home yourself: when the code is in several places, or it changed on the way.
+
+- The new home is found, not guessed: the symbol, under the same name, whose code as stamped — its normalized `body`, so formatting, comments and local names don't count — is in exactly one other file. See [moved code](concepts.md#moved-code-and-re-exports).
+- `path` changes by definition, and `export` may: a helper moved into a module of its own is usually exported now, and that isn't a change to its contract. Any other bound tier that differs at the new place is drift and stays drift (`status: drifted`, reported, fingerprint kept as stamped) — review the claim, then `link --reviewed`, or pass `--reviewed` to `repoint` once you have.
+- When the claim sentence itself names the old file, `repoint` says so: that wording is yours to fix.
+- Each move is an `anchor.relocated` event in the ledger. `--dry-run` prints the plan and writes nothing. Exits `1` when it skipped any id you named.
+
+```bash
+lockwire repoint                       # everything check found a new home for
+lockwire repoint k7q2m9xv              # one claim
+lockwire repoint k7q2m9xv --to src/retry/delay.ts#retryDelay
+lockwire repoint --dry-run
 ```
 
 ## Configuration: `.lockwire/config.json`

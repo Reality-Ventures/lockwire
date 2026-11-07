@@ -6,6 +6,7 @@ export {
   linkDoc,
   linkLockfileOnly,
   refs,
+  repoint,
   resolveTarget,
   status,
   unlink,
@@ -19,5 +20,7 @@ export { canonicalJson, fingerprint, fingerprintSet } from "./hash.js";
 export { historyFor, readLedger, verifyLedger } from "./ledger.js";
 export { readLockfile, writeLockfile } from "./lockfile.js";
 export { scanMarkers } from "./markers.js";
+export { type MoveHint, SourceIndex } from "./moves.js";
+export { extractReExports, resolveModule } from "./reexports.js";
 export { findRepoRoot } from "./repo.js";
 export * from "./types.js";
