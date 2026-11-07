@@ -12,6 +12,8 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Fixed
 
+- **The Claude Code plugin updates.** Its manifest pinned `"version": "0.1.0"`, and Claude Code keeps every user on a pinned version until it changes, so installs never moved past the copy first installed (`claude plugin update` said it was already the latest) while the CLI went on to 0.1.32. The manifest no longer sets a version, so Claude Code versions it by commit and each release on `main` is an update; the README shows how to turn on auto-update, for yourself or for everyone on a repository.
+
 Found by running lockwire on ky, hono, zod, httpx, click, requests, pydantic, express, jotai and a benchmark repository; each finding has a regression test.
 
 - **`sig` now holds the contract as written** (fingerprint version 2). Version 1 recorded only that a parameter had a type, so changing `userId: UserId` to `userId: string` — the README's own example — went unnoticed, as did defaults, Python's `*` and `/`, generics, base classes, TS decorators and modifiers (`private`, `static`, `async`), overloads, destructured props, a variable's declared type and an interface's members. `sig` is read as tokens, so a formatter rewrapping a signature, re-spacing a return type or adding a trailing comma no longer drifts it either. Existing anchors are compared under the version they were stamped with and re-stamped the current way the first time they check fresh, so upgrading flags nothing.

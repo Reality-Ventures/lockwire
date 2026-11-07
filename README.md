@@ -180,6 +180,17 @@ sequenceDiagram
 /plugin install lockwire@lockwire
 ```
 
+Claude Code versions the plugin by commit, so every release on `main` is an update. Third-party marketplaces don't auto-update by default: run `claude plugin update lockwire@lockwire`, or turn on **Enable auto-update** for the `lockwire` marketplace under `/plugin` → **Marketplaces** to be told `Plugin updated: lockwire · Run /reload-plugins to apply` when there's a new one. To do that for everyone on a repository, commit this to its `.claude/settings.json`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "lockwire": { "source": { "source": "github", "repo": "Reality-Ventures/lockwire" }, "autoUpdate": true }
+  },
+  "enabledPlugins": { "lockwire@lockwire": true }
+}
+```
+
 **Codex, Cursor, Gemini CLI, and other agents that read `SKILL.md`** — the skill only; wire up the hook and MCP server per your agent (see [docs/agents.md](docs/agents.md)):
 
 ```bash

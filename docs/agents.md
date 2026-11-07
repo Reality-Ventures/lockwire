@@ -10,6 +10,8 @@ How lockwire wires into Claude Code, Codex, other agents via skills, and MCP.
 - [`.mcp.json`](../.mcp.json) — the `lockwire` MCP server, run the same way
 - [`skills/lockwire/SKILL.md`](../skills/lockwire/SKILL.md) — usage guidance loaded when the agent is working with docs
 
+**Updates.** The manifest sets no `version`, so Claude Code versions the plugin by the commit it was installed from, and every push to `main` is an update; a pinned version would keep every user on the copy they first installed. Updating needs `claude plugin update lockwire@lockwire`, or auto-update turned on for the marketplace (off by default for third-party marketplaces), which then shows `Plugin updated: lockwire · Run /reload-plugins to apply`. The [README](../README.md#install) has the `.claude/settings.json` that turns it on for everyone on a repository.
+
 ### What the hook actually does
 
 **`PreToolUse`** (before an `Edit` or `Write` lands): normalizes the touched file's path, looks up every anchor targeting it, and — if any exist — injects them as `additionalContext`:

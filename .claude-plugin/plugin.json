@@ -2,7 +2,6 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin.json",
   "name": "lockwire",
   "displayName": "lockwire",
-  "version": "0.1.0",
   "description": "Bind documentation claims to tiered code fingerprints. Catch stale CLAUDE.md, AGENTS.md and docs at write time, with a tamper-evident history.",
   "author": { "name": "Talha Hameed" },
   "homepage": "https://github.com/Reality-Ventures/lockwire",
