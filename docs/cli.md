@@ -231,9 +231,11 @@ Recomputes every ledger event's hash and reports any that don't match (by line n
 lockwire ledger verify
 ```
 
-## `lockwire hook claude-pre|claude-post|codex-pre|codex-post`
+## `lockwire hook claude-pre|claude-post|claude-session|codex-pre|codex-post`
 
 Reads a hook payload as JSON on stdin, writes a hook response as JSON on stdout. Not meant to be run by hand — see [docs/agents.md](agents.md) for the exact payloads and how they're wired into `hooks/hooks.json`.
+
+`claude-session` runs once when a Claude Code session starts and prints nothing unless `lockwire.lock` holds claims [a newer lockwire stamped](agents.md#when-the-plugin-and-the-cli-disagree) than the plugin that's running.
 
 ## `lockwire mcp`
 

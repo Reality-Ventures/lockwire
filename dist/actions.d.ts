@@ -103,6 +103,8 @@ export interface AnchorCheckResult {
     claimChanged?: boolean;
     /** Outside the scope of a path-limited run: reported with its stored status, not re-examined. */
     skipped?: boolean;
+    /** Why this lockwire can't check the anchor: a newer one stamped it (see compat.ts). Also `skipped`. */
+    unreadable?: string;
     /**
      * For a value anchor whose value moved or no longer matches its sentence: what it was when stamped,
      * what it is now, the numbers the sentence states, and whether the sentence still holds.

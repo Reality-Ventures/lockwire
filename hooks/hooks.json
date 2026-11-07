@@ -1,6 +1,22 @@
 {
-  "description": "Injects documentation claims that cover a file before it's edited, and flags claims the edit just drifted, afterward. Fails open: a broken hook never blocks the tool call — see docs/agents.md.",
+  "description": "At session start, says when lockwire.lock holds claims a newer lockwire stamped (so the plugin needs updating). Injects documentation claims that cover a file before it's edited, and flags claims the edit just drifted, afterward. Fails open: a broken hook never blocks the tool call — see docs/agents.md.",
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/cli.js",
+              "hook",
+              "claude-session"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Edit|Write",
@@ -8,7 +24,11 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/cli.js", "hook", "claude-pre"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/cli.js",
+              "hook",
+              "claude-pre"
+            ],
             "timeout": 10,
             "statusMessage": "lockwire: checking documentation claims…"
           }
@@ -22,7 +42,11 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/cli.js", "hook", "claude-post"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/cli.js",
+              "hook",
+              "claude-post"
+            ],
             "timeout": 10,
             "statusMessage": "lockwire: re-checking documentation claims…"
           }

@@ -65,6 +65,8 @@ interface PromptResult {
 }
 export declare class McpServer {
     private readonly info;
+    /** Told to the client at `initialize`, for its model to read; computed then, so it's current. */
+    private readonly instructions?;
     private readonly tools;
     private readonly prompts;
     private transport;
@@ -72,7 +74,9 @@ export declare class McpServer {
     constructor(info: {
         name: string;
         version: string;
-    });
+    }, 
+    /** Told to the client at `initialize`, for its model to read; computed then, so it's current. */
+    instructions?: (() => string | undefined) | undefined);
     /** The client's own name and version, from its `initialize` request. */
     getClientVersion(): {
         name?: string;

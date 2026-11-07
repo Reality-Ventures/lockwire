@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { withLevel } from "./compat.js";
 import { stripBom } from "./repo.js";
 const LOCKFILE_NAME = "lockwire.lock";
 export function lockfilePath(repoRoot) {
@@ -21,10 +22,20 @@ export async function readLockfile(repoRoot) {
     }
     return { version: 1, anchors: parsed.anchors ?? [] };
 }
+/** The lockfile's anchors read synchronously, or null when there's none or it can't be read. */
+export function readLockfileSync(repoRoot) {
+    try {
+        const raw = stripBom(readFileSync(lockfilePath(repoRoot), "utf8"));
+        return { version: 1, anchors: JSON.parse(raw).anchors ?? [] };
+    }
+    catch {
+        return null;
+    }
+}
 export async function writeLockfile(repoRoot, lockfile) {
     const sorted = {
         version: 1,
-        anchors: [...lockfile.anchors].sort((a, b) => a.id.localeCompare(b.id)),
+        anchors: lockfile.anchors.map(withLevel).sort((a, b) => a.id.localeCompare(b.id)),
     };
     await writeFileAtomic(lockfilePath(repoRoot), `${JSON.stringify(sorted, null, 2)}\n`);
 }

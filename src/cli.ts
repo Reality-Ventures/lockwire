@@ -18,14 +18,15 @@ import {
 import { cliActor } from "./actor.js";
 import { autofix } from "./autofix.js";
 import { changedFiles } from "./changed.js";
+import { newerWriterNotice } from "./compat.js";
 import { readConfig, writeConfig } from "./config.js";
 import { ensureLockwireGitignore, indexPath, loadDocIndex } from "./docindex.js";
 import { formatGithub, formatJson, formatText } from "./format.js";
-import { runClaudeHook } from "./hook-claude.js";
+import { runClaudeHook, runClaudeSessionHook } from "./hook-claude.js";
 import { runCodexHook } from "./hook-codex.js";
 import { verifyLedger } from "./ledger.js";
 import { withRepoLock } from "./lock.js";
-import { writeLockfile } from "./lockfile.js";
+import { readLockfile, writeLockfile } from "./lockfile.js";
 import { scanMarkers } from "./markers.js";
 import {
   findRepoRoot,
@@ -77,6 +78,19 @@ function parseFlags(args: string[]): {
   return { positional, flags };
 }
 
+/** The commands that read or re-stamp claims, and so should say when some were stamped by a newer lockwire. */
+const READS_CLAIMS = new Set([
+  "link",
+  "check",
+  "repoint",
+  "tasks",
+  "task",
+  "resolve",
+  "status",
+  "ack",
+  "autofix",
+]);
+
 /** `path#symbol`, split at the first `#`: a symbol (a CSV row key) can contain one, a path can't. */
 function splitTarget(target: string): [string, string | undefined] {
   const hash = target.indexOf("#");
@@ -126,6 +140,15 @@ async function main() {
   const { positional, flags } = parseFlags(rest);
   const repoRoot = findRepoRoot(process.cwd());
   const actor = cliActor();
+
+  // Commands that read claims say so when a newer lockwire stamped some this one can't check. On
+  // stderr, so `--json` and `--format` output stay parseable.
+  if (cmd && READS_CLAIMS.has(cmd) && existsSync(`${repoRoot}/lockwire.lock`)) {
+    const notice = await readLockfile(repoRoot)
+      .then((lock) => newerWriterNotice(lock, "cli"))
+      .catch(() => null);
+    if (notice) console.error(notice);
+  }
 
   switch (cmd) {
     case "init": {
@@ -413,9 +436,13 @@ async function main() {
       const adapter = positional[0];
       if (adapter === "claude-pre" || adapter === "claude-post")
         await runClaudeHook(adapter, repoRoot);
+      else if (adapter === "claude-session") await runClaudeSessionHook(repoRoot);
       else if (adapter === "codex-pre" || adapter === "codex-post")
         await runCodexHook(adapter, repoRoot);
-      else throw new Error("usage: lockwire hook claude-pre|claude-post|codex-pre|codex-post");
+      else
+        throw new Error(
+          "usage: lockwire hook claude-pre|claude-post|claude-session|codex-pre|codex-post",
+        );
       break;
     }
 

@@ -6,11 +6,21 @@ How lockwire wires into Claude Code, Codex, other agents via skills, and MCP.
 
 `/plugin install lockwire@lockwire` installs three things at once, declared in [`.claude-plugin/plugin.json`](../.claude-plugin/plugin.json):
 
-- [`hooks/hooks.json`](../hooks/hooks.json) — a `PreToolUse` and `PostToolUse` hook, both matching `Edit|Write`, each running `node ${CLAUDE_PLUGIN_ROOT}/dist/cli.js hook claude-pre|claude-post`
+- [`hooks/hooks.json`](../hooks/hooks.json) — a `PreToolUse` and `PostToolUse` hook, both matching `Edit|Write`, each running `node ${CLAUDE_PLUGIN_ROOT}/dist/cli.js hook claude-pre|claude-post`, and a `SessionStart` hook (`claude-session`) that says when the plugin is older than the lockwire that stamped the lockfile
 - [`.mcp.json`](../.mcp.json) — the `lockwire` MCP server, run the same way
 - [`skills/lockwire/SKILL.md`](../skills/lockwire/SKILL.md) — usage guidance loaded when the agent is working with docs
 
 **Updates.** The manifest sets no `version`, so Claude Code versions the plugin by the commit it was installed from, and every push to `main` is an update; a pinned version would keep every user on the copy they first installed. Updating needs `claude plugin update lockwire@lockwire`, or auto-update turned on for the marketplace (off by default for third-party marketplaces), which then shows `Plugin updated: lockwire · Run /reload-plugins to apply`. The [README](../README.md#install) has the `.claude/settings.json` that turns it on for everyone on a repository.
+
+### When the plugin and the CLI disagree
+
+The plugin and the `lockwire` from npm are separate installs that update separately, so one can be older than the lockwire that last wrote `lockwire.lock`. An older lockwire would misread what a newer one stamped, reporting drift that isn't there or, on re-linking, downgrading the anchor. So each anchor records what it takes to read it (its fingerprint version, and a `level` once a change needs one), and a lockwire that can't read an anchor leaves it as written and says to update:
+
+- **Claude Code** — the `SessionStart` hook adds a line to the session's context, so Claude tells you and suggests `claude plugin update lockwire@lockwire` then `/reload-plugins`.
+- **Any MCP client** — the same line comes back in the server's `initialize` instructions.
+- **The CLI** — a `warning:` on stderr (stdout, `--json` and `--format` stay parseable) naming `npm install -g lockwire@latest`.
+
+`check` skips those anchors (they aren't counted, and can't fail the run), and `link`, `ack` and `repoint` refuse them until lockwire is updated. This is a check against the lockfile, not against npm: lockwire makes no network calls, so it never asks what the latest version is.
 
 ### What the hook actually does
 

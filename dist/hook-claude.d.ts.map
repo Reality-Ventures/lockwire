@@ -1,1 +1,1 @@
-{"version":3,"file":"hook-claude.d.ts","sourceRoot":"","sources":["../src/hook-claude.ts"],"names":[],"mappings":"AAcA;;;GAGG;AACH,wBAAsB,aAAa,CACjC,OAAO,EAAE,YAAY,GAAG,aAAa,EACrC,YAAY,EAAE,MAAM,GACnB,OAAO,CAAC,IAAI,CAAC,CAiDf"}
+{"version":3,"file":"hook-claude.d.ts","sourceRoot":"","sources":["../src/hook-claude.ts"],"names":[],"mappings":"AAiBA;;;;GAIG;AACH,wBAAsB,oBAAoB,CAAC,YAAY,EAAE,MAAM,GAAG,OAAO,CAAC,IAAI,CAAC,CAgB9E;AAED;;;GAGG;AACH,wBAAsB,aAAa,CACjC,OAAO,EAAE,YAAY,GAAG,aAAa,EACrC,YAAY,EAAE,MAAM,GACnB,OAAO,CAAC,IAAI,CAAC,CAiDf"}

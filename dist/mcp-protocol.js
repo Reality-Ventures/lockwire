@@ -36,12 +36,16 @@ const issuesText = (error) => error.issues
     .join("; ");
 export class McpServer {
     info;
+    instructions;
     tools = new Map();
     prompts = new Map();
     transport;
     clientInfo;
-    constructor(info) {
+    constructor(info, 
+    /** Told to the client at `initialize`, for its model to read; computed then, so it's current. */
+    instructions) {
         this.info = info;
+        this.instructions = instructions;
     }
     /** The client's own name and version, from its `initialize` request. */
     getClientVersion() {
@@ -96,7 +100,15 @@ export class McpServer {
                 const info = params.clientInfo;
                 if (info && typeof info === "object")
                     this.clientInfo = info;
+                let instructions;
+                try {
+                    instructions = this.instructions?.();
+                }
+                catch {
+                    // instructions are a courtesy: never fail the handshake over them
+                }
                 return {
+                    ...(instructions ? { instructions } : {}),
                     protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.find((v) => v === asked)
                         ? asked
                         : SUPPORTED_PROTOCOL_VERSIONS[0],

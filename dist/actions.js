@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { headCommit } from "./changed.js";
+import { unreadableReason } from "./compat.js";
 import { loadDocIndex } from "./docindex.js";
 import { computeWholeFileTiers, extractFileSymbols, FINGERPRINT_VERSION, fileExportsFingerprint, } from "./extract.js";
 import { langForPath, parserFor } from "./grammar.js";
@@ -330,6 +331,15 @@ export async function linkDoc(repoRoot, docPath, config, actor, opts = {}) {
                 copiedId = true;
                 existing = undefined;
             }
+        }
+        // Re-stamping what a newer lockwire wrote would downgrade it to what this one understands.
+        const tooNew = existing && !copiedId ? unreadableReason(existing) : null;
+        if (tooNew) {
+            result.skipped.push({
+                reason: `stamped by a newer lockwire (${tooNew}): update this lockwire to re-link it`,
+                target: targetLabel,
+            });
+            continue;
         }
         // One unsupported or unparseable target must not stop the rest of the doc from linking.
         let resolved;
@@ -699,12 +709,15 @@ export async function check(repoRoot, config, onlyPaths, opts = {}) {
         const inScope = !onlyPaths ||
             inPathScope(anchor.target.path, onlyPaths) ||
             (anchor.doc !== null && inPathScope(anchor.doc, onlyPaths));
-        if (!inScope) {
+        // A newer lockwire stamped it: checking it the way this one reads would report drift that isn't there.
+        const tooNew = unreadableReason(anchor);
+        if (!inScope || tooNew) {
             results.push({
                 anchor,
                 status: anchor.status,
                 driftedTiers: [],
                 skipped: true,
+                ...(tooNew ? { unreadable: tooNew } : {}),
                 singleHashWouldFlag: false,
             });
             continue;
@@ -1059,6 +1072,9 @@ export async function ack(repoRoot, anchorId, resolution, note, actor, config) {
     const anchor = lockfile.anchors.find((a) => a.id === anchorId);
     if (!anchor)
         throw new Error(`no anchor ${anchorId}`);
+    const tooNew = unreadableReason(anchor);
+    if (tooNew && resolution !== "superseded")
+        throw new Error(`${anchorId} was stamped by a newer lockwire (${tooNew}): update this lockwire to acknowledge it`);
     let updated = anchor;
     if (resolution === "superseded") {
         updated = { ...anchor, status: "superseded" };
@@ -1176,6 +1192,11 @@ export async function repoint(repoRoot, config, actor, opts = {}) {
         const skip = (reason) => result.skipped.push({ id: anchor.id, target: targetLabel(anchor.target), reason });
         if (anchor.status === "superseded") {
             skip("superseded: its claim no longer applies, so there is nothing to re-point");
+            continue;
+        }
+        const tooNew = unreadableReason(anchor);
+        if (tooNew) {
+            skip(`stamped by a newer lockwire (${tooNew}): update this lockwire to re-point it`);
             continue;
         }
         if (to.path === anchor.target.path && to.symbol === anchor.target.symbol) {

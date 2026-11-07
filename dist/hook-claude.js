@@ -1,5 +1,31 @@
+import { newerWriterNotice } from "./compat.js";
 import { readConfig } from "./config.js";
 import { absoluteHookPath, buildAdvisoryText, claimsForPath, hookActor, logHookError, normalizeTouchedPath, readStdinJson, reportDriftFor, resolveHookRoot, unlinkedClaimsFor, } from "./hook-common.js";
+import { readLockfile } from "./lockfile.js";
+import { isLockwireRepo, tryFindRepoRoot } from "./repo.js";
+/**
+ * Claude Code SessionStart adapter: once per session, tell the agent when `lockwire.lock` holds claims
+ * a newer lockwire stamped than the plugin that's running, so it can suggest updating. Silent
+ * otherwise, inert outside a repo that uses lockwire, and fail-open like the other hooks.
+ */
+export async function runClaudeSessionHook(fallbackRoot) {
+    let repoRoot = fallbackRoot;
+    try {
+        const input = await readStdinJson();
+        repoRoot = tryFindRepoRoot(input.cwd ?? process.cwd()) ?? fallbackRoot;
+        if (!isLockwireRepo(repoRoot))
+            return;
+        const notice = newerWriterNotice(await readLockfile(repoRoot), "agent");
+        if (!notice)
+            return;
+        process.stdout.write(JSON.stringify({
+            hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: notice },
+        }));
+    }
+    catch (err) {
+        await logHookError(repoRoot, "claude-session", err);
+    }
+}
 /**
  * Claude Code PreToolUse/PostToolUse adapter. Fail-open by contract: any exception here must
  * result in exit 0 with no output, never a broken tool call. See LOCKWIRE-SPEC.md §6.

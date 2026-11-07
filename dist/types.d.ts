@@ -59,6 +59,11 @@ export interface Anchor {
      * stamped before versions existed, which are version 1.
      */
     fingerprintVersion?: number;
+    /**
+     * The reader level it takes to check this anchor (see compat.ts), when above 1. A lockwire that
+     * reads a lower level leaves the anchor alone and says to update.
+     */
+    level?: number;
 }
 export interface Lockfile {
     version: 1;

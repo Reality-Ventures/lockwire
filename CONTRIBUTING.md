@@ -28,6 +28,8 @@ CI (`.github/workflows/ci.yml`) runs all of this on Ubuntu and Windows.
 
 Every push to `main` publishes to npm. `.github/workflows/release.yml` builds, tests, and publishes via [trusted publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC) — no stored token. The version is computed in CI and never committed back: `package.json`'s `version` is published as-is if npm doesn't have it yet, otherwise the next patch above the highest published `X.Y.*` (`scripts/next-version.mjs`). Bump `version` by hand to start a new minor or major line. Put `[skip ci]` in a commit message to push without publishing. One-time npmjs.com setup: package Settings → Trusted Publisher → GitHub Actions → org `Reality-Ventures`, repo `lockwire`, workflow `release.yml`.
 
+**Changing what lockwire writes.** An older lockwire misreads anything it didn't know to expect. A new fingerprint version is already safe: bump `FINGERPRINT_VERSION` and anchors record it. For any other change an older build would misread (a new tier or target kind), raise `READER_LEVEL` in `src/compat.ts` and make `requiredLevel` return it for the anchors that use it; older builds then leave those anchors alone and tell people to update.
+
 ## Where things live
 
 | Path | What |

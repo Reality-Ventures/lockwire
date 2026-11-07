@@ -12,6 +12,7 @@ All notable changes to this project are documented here. Format follows [Keep a 
 
 ### Fixed
 
+- **A lockwire older than the one that stamped the lockfile now says so.** The plugin and the npm CLI are separate installs, so they drift apart (a plugin stuck on 0.1.0 beside a 0.1.32 CLI left 16 JSON anchors unbound and nothing warned). Each anchor now records what it takes to read it; an older lockwire skips the ones it can't (`check` doesn't count them or fail on them, and `link`, `ack` and `repoint` refuse them) instead of reporting drift that isn't there or downgrading them, and says to update: through a new `SessionStart` hook in Claude Code, the MCP `initialize` instructions, and a `warning:` on stderr from the CLI. It checks the lockfile, not npm, so lockwire still makes no network calls.
 - **The Claude Code plugin updates.** Its manifest pinned `"version": "0.1.0"`, and Claude Code keeps every user on a pinned version until it changes, so installs never moved past the copy first installed (`claude plugin update` said it was already the latest) while the CLI went on to 0.1.32. The manifest no longer sets a version, so Claude Code versions it by commit and each release on `main` is an update; the README shows how to turn on auto-update, for yourself or for everyone on a repository.
 
 Found by running lockwire on ky, hono, zod, httpx, click, requests, pydantic, express, jotai and a benchmark repository; each finding has a regression test.

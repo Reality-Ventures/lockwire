@@ -13,10 +13,11 @@ import {
   waive,
 } from "./actions.js";
 import { changedFiles } from "./changed.js";
+import { newerWriterNotice } from "./compat.js";
 import { readConfig } from "./config.js";
 import type { IndexStats } from "./docindex.js";
 import { withRepoLock } from "./lock.js";
-import { lockfilePath } from "./lockfile.js";
+import { lockfilePath, readLockfileSync } from "./lockfile.js";
 import { McpServer, StdioServerTransport } from "./mcp-protocol.js";
 import { toRepoPath } from "./repo.js";
 import { fixDocsPrompt, listTasks, resolveTask, taskContext } from "./tasks.js";
@@ -43,7 +44,12 @@ export function createServer(
   repoRoot: string,
   opts: { onIndexStats?: (stats: IndexStats) => void } = {},
 ): McpServer {
-  const server = new McpServer({ name: "lockwire", version: "0.1.0" });
+  // An older lockwire than the one that stamped some claims says so up front, so the model can
+  // suggest updating instead of trusting results for claims it can't check.
+  const server = new McpServer({ name: "lockwire", version: "0.1.0" }, () => {
+    const lock = readLockfileSync(repoRoot);
+    return lock ? (newerWriterNotice(lock, "agent") ?? undefined) : undefined;
+  });
   // The server outlives many calls, so it keeps the doc index in memory: the first `claims_for`
   // builds (or loads) it, later ones only re-validate it. Nothing is written to disk.
   const indexSession: IndexSession = {};

@@ -107,7 +107,11 @@ export class McpServer {
   private transport: Transport | undefined;
   private clientInfo: { name?: string; version?: string } | undefined;
 
-  constructor(private readonly info: { name: string; version: string }) {}
+  constructor(
+    private readonly info: { name: string; version: string },
+    /** Told to the client at `initialize`, for its model to read; computed then, so it's current. */
+    private readonly instructions?: () => string | undefined,
+  ) {}
 
   /** The client's own name and version, from its `initialize` request. */
   getClientVersion(): { name?: string; version?: string } | undefined {
@@ -173,7 +177,14 @@ export class McpServer {
         const asked = params.protocolVersion;
         const info = params.clientInfo;
         if (info && typeof info === "object") this.clientInfo = info as typeof this.clientInfo;
+        let instructions: string | undefined;
+        try {
+          instructions = this.instructions?.();
+        } catch {
+          // instructions are a courtesy: never fail the handshake over them
+        }
         return {
+          ...(instructions ? { instructions } : {}),
           protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.find((v) => v === asked)
             ? asked
             : SUPPORTED_PROTOCOL_VERSIONS[0],
