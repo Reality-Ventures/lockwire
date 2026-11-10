@@ -173,6 +173,33 @@ sequenceDiagram
 
 ## Install
 
+**Have your AI do it.** Paste this into Claude Code, Codex, Cursor or any coding agent, in the repository you want to protect:
+
+```text
+Set up lockwire (https://github.com/Reality-Ventures/lockwire) in this repository. It binds
+claims in our docs to the code they describe and flags them when the code changes. It's an npm
+package with one runtime dependency and makes no network calls.
+
+1. Install it for the agent you are:
+   - Claude Code: add this to .claude/settings.json (merge with what's there), then tell me to
+     run /reload-plugins:
+     {"extraKnownMarketplaces": {"lockwire": {"source": {"source": "github",
+       "repo": "Reality-Ventures/lockwire"}, "autoUpdate": true}},
+      "enabledPlugins": {"lockwire@lockwire": true}}
+   - Anything else: run `npx skills add Reality-Ventures/lockwire`, and register
+     `npx -y lockwire mcp` as a stdio MCP server if you support MCP.
+2. Run `npx lockwire init` at the repository root.
+3. In CLAUDE.md, AGENTS.md or README.md, find 3 to 5 sentences that state something specific about
+   our code (a function's parameters, a default, a limit, where something lives). Above each, add a
+   marker naming the code and what the sentence depends on, e.g.
+   <!-- lockwire src/auth/session.ts#createSession sig -->
+   (sig: signature and types; body: behaviour; deps: what it calls; path: where it lives).
+4. Run `npx lockwire link <doc>` for each doc you changed, then `npx lockwire check`, and show me
+   the result.
+
+Don't commit, push or run `lockwire autofix`; I'll review the changes first.
+```
+
 **Claude Code** — hook, MCP server, and skill in one plugin:
 
 ```bash
