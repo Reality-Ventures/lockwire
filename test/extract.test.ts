@@ -231,7 +231,8 @@ class C:
       "python",
     );
     expect([...s.bySymbolPath.keys()].sort()).toEqual(["C", "C.p", "C.s", "view"]);
-    expect(s.bySymbolPath.get("view")?.sigTokens).toBe("fn view(a,b=1) [@app.route('/x')]");
+    // A string reads the same whichever quotes it's written with (fingerprint version 3).
+    expect(s.bySymbolPath.get("view")?.sigTokens).toBe('fn view(a,b=1) [@app.route("/x")]');
   });
 
   it("Python has no `export`, so decorating a function doesn't make it one", async () => {

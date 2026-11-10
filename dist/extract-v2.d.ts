@@ -19,15 +19,25 @@
  *   isn't part of the body.
  * - `deps` names each call by its structure (`client.get().json`), so reformatting a call chain or
  *   renaming a local passed as an argument doesn't move it.
+ *
+ * Version 3 is version 2 except that what code formatters (Black, Ruff, Prettier) rewrite without
+ * changing behaviour reads the same either way, in `sig` and `body` alike: a string's quotes, escaped
+ * quotes and prefix case (`'it\'s'`, `"it's"`, `U'a'`); a number's spelling (`0XAB`, `1E5`, and in
+ * TS/JS `1.50`, `.5`); Python's optional parentheses (`from m import (a)`, `with (a, b):`,
+ * `for (x, y) in`, `return (a, b)`, `-> (int)`); an arrow's single parameter with or without
+ * parentheses; and a quoted key that needn't be (`{ 'a': 1 }`). It also stops reading a class's or a
+ * whole file's own top-level names (a model's fields, a module's constants) as locals: renaming one
+ * is a change (see {@link collectLocals}). Version-2 anchors keep being read the version-2 way (see
+ * {@link withVersion}) until a check finds them unchanged and re-stamps them.
  */
 import type { Node } from "web-tree-sitter";
 import type { LangId } from "./grammar.js";
 import type { FileSymbols } from "./types.js";
 /** A node as its tokens: comments and layout dropped, a trailing comma before a closer dropped. */
-export declare function canon(node: Node): string;
-export declare function extractFileSymbolsV2(root: Node, lang: LangId, normalizeLocals: boolean): FileSymbols;
-/** Whole-file `body` and `deps` for a file-only anchor, read the version-2 way. */
-export declare function computeWholeFileTiersV2(root: Node, lang: LangId, normalizeLocals: boolean): {
+export declare function canon(node: Node, lang?: LangId): string;
+export declare function extractFileSymbolsV2(root: Node, lang: LangId, normalizeLocals: boolean, version?: number): FileSymbols;
+/** Whole-file `body` and `deps` for a file-only anchor, read the version-2 (or 3) way. */
+export declare function computeWholeFileTiersV2(root: Node, lang: LangId, normalizeLocals: boolean, version?: number): {
     bodyNormalized: string;
     deps: string[];
 };

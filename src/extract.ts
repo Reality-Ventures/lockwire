@@ -7,9 +7,9 @@ import type { FileSymbols, ResolvedSymbol } from "./types.js";
 /**
  * How fingerprints are computed. Anchors record the version they were stamped with, and `check`
  * compares each one under its own version, so changing the extractor never makes an existing anchor
- * look drifted. Version 1 is this file; version 2 is extract-v2.ts.
+ * look drifted. Version 1 is this file; versions 2 and 3 are extract-v2.ts.
  */
-export const FINGERPRINT_VERSION = 2;
+export const FINGERPRINT_VERSION = 3;
 
 const IDENTIFIER_TYPES = new Set([
   "identifier",
@@ -313,7 +313,7 @@ export function extractFileSymbols(
   normalizeLocals: boolean,
   version: number = FINGERPRINT_VERSION,
 ): FileSymbols {
-  if (version >= 2) return extractFileSymbolsV2(root, lang, normalizeLocals);
+  if (version >= 2) return extractFileSymbolsV2(root, lang, normalizeLocals, version);
   const decl = DECLARATION_TYPES[lang];
   const importedNames = collectImportedNames(root, lang);
   const bySymbolPath = new Map<string, ResolvedSymbol>();
@@ -448,7 +448,7 @@ export function computeWholeFileTiers(
   normalizeLocals: boolean,
   version: number = FINGERPRINT_VERSION,
 ): { bodyNormalized: string; deps: string[] } {
-  if (version >= 2) return computeWholeFileTiersV2(root, lang, normalizeLocals);
+  if (version >= 2) return computeWholeFileTiersV2(root, lang, normalizeLocals, version);
   const importedNames = collectImportedNames(root, lang);
   const locals = collectLocalDeclared(root, [], lang);
   return {

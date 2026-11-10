@@ -4,9 +4,9 @@ import type { FileSymbols } from "./types.js";
 /**
  * How fingerprints are computed. Anchors record the version they were stamped with, and `check`
  * compares each one under its own version, so changing the extractor never makes an existing anchor
- * look drifted. Version 1 is this file; version 2 is extract-v2.ts.
+ * look drifted. Version 1 is this file; versions 2 and 3 are extract-v2.ts.
  */
-export declare const FINGERPRINT_VERSION = 2;
+export declare const FINGERPRINT_VERSION = 3;
 /**
  * Walks a parsed file and resolves every top-level function/class, and every method inside
  * each class, into a dotted symbol path ("createSession", "AuthConfig.refresh") with its

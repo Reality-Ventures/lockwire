@@ -3,9 +3,9 @@ import { fingerprintSet } from "./hash.js";
 /**
  * How fingerprints are computed. Anchors record the version they were stamped with, and `check`
  * compares each one under its own version, so changing the extractor never makes an existing anchor
- * look drifted. Version 1 is this file; version 2 is extract-v2.ts.
+ * look drifted. Version 1 is this file; versions 2 and 3 are extract-v2.ts.
  */
-export const FINGERPRINT_VERSION = 2;
+export const FINGERPRINT_VERSION = 3;
 const IDENTIFIER_TYPES = new Set([
     "identifier",
     "property_identifier",
@@ -293,7 +293,7 @@ function collectDeps(subtree, lang, importedNames) {
  */
 export function extractFileSymbols(root, lang, normalizeLocals, version = FINGERPRINT_VERSION) {
     if (version >= 2)
-        return extractFileSymbolsV2(root, lang, normalizeLocals);
+        return extractFileSymbolsV2(root, lang, normalizeLocals, version);
     const decl = DECLARATION_TYPES[lang];
     const importedNames = collectImportedNames(root, lang);
     const bySymbolPath = new Map();
@@ -413,7 +413,7 @@ export function fileExportsFingerprint(symbols) {
 /** Whole-file tiers for a file-only anchor (no `#Symbol`): same normalization pipeline, applied to the root node. */
 export function computeWholeFileTiers(root, lang, normalizeLocals, version = FINGERPRINT_VERSION) {
     if (version >= 2)
-        return computeWholeFileTiersV2(root, lang, normalizeLocals);
+        return computeWholeFileTiersV2(root, lang, normalizeLocals, version);
     const importedNames = collectImportedNames(root, lang);
     const locals = collectLocalDeclared(root, [], lang);
     return {

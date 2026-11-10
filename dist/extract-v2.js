@@ -1,17 +1,149 @@
+/**
+ * Whether the extraction under way reads formatting the version-3 way. Set for the length of one
+ * (synchronous) extraction by {@link withVersion}, so the helpers below needn't all carry it.
+ */
+let formatProof = false;
+function withVersion(version, run) {
+    const saved = formatProof;
+    formatProof = version >= 3;
+    try {
+        return run();
+    }
+    finally {
+        formatProof = saved;
+    }
+}
+/** `\'` and `\"` as the quote alone; every other escape as written. */
+const unescapeQuotes = (s) => s.replace(/\\([\s\S])/g, (pair, c) => (c === "'" || c === '"' ? c : pair));
+/**
+ * A string literal whichever quotes delimit it: its prefix (lower case, sorted, without Python 3's
+ * no-op `u`) and its contents with escaped quotes unescaped. `inner` renders an f-string's
+ * interpolations. Null for anything but a plain or f-string literal (a template literal keeps its
+ * backticks: there's no other way to write one).
+ */
+function stringLiteral(node, lang, inner) {
+    // Named: TS's `string` keyword is an unnamed node of the same type.
+    if (node.type !== "string" || !node.isNamed)
+        return null;
+    if (lang !== "python")
+        return JSON.stringify(unescapeQuotes(node.text.slice(1, -1)));
+    let prefix = "";
+    let quote = 1;
+    let contents = "";
+    const text = (t) => {
+        contents += prefix.includes("r") ? t : unescapeQuotes(t);
+    };
+    for (const c of node.children) {
+        if (!c || c.isExtra)
+            continue;
+        if (c.type === "string_start") {
+            const delimiter = c.text.replace(/^[^'"]*/, "");
+            quote = delimiter.length;
+            prefix = [...c.text.slice(0, -quote).toLowerCase().replace("u", "")].sort().join("");
+        }
+        // An f-string's own braces are written doubled (`{{`), so an interpolation can't be mistaken for text.
+        else if (c.type === "interpolation")
+            contents += inner(c);
+        // The grammar ends `r'\''` with a `string_end` of `\''`: what precedes the closing quote is text.
+        else if (c.type === "string_end")
+            text(c.text.slice(0, -quote));
+        else
+            text(c.text);
+    }
+    return `${prefix}${JSON.stringify(contents)}`;
+}
+/** A number literal however it's spelled: case, `_` separators and, in TS/JS, the value it denotes. */
+function numberLiteral(text, lang) {
+    const t = text.toLowerCase().replace(/_/g, "");
+    // Python keeps the spelling (`1` and `1.0` are different types); so do BigInts and legacy octals.
+    if (lang === "python" || t.endsWith("n") || /^0\d/.test(t))
+        return t;
+    const value = Number(t);
+    return Number.isFinite(value) ? String(value) : t;
+}
+const NUMBER_TYPES = new Set(["number", "integer", "float"]);
+/** The node types version 3 reads differently from version 2 (bar optional parentheses). */
+const FORMATTED_TYPES = new Set(["string", ...NUMBER_TYPES, "formal_parameters"]);
+/** Members whose name may be quoted or not, as long as it's an identifier either way. */
+const NAMED_MEMBERS = new Set([
+    "pair",
+    "property_signature",
+    "method_signature",
+    "public_field_definition",
+    "field_definition",
+    "method_definition",
+    "abstract_method_signature",
+]);
+/** A quoted member name that needn't be (`{ 'a': 1 }`): the bare name. */
+function unquotedKey(node, lang) {
+    if (lang === "python" || node.type !== "string" || !node.isNamed)
+        return null;
+    const parent = node.parent;
+    if (!parent || !NAMED_MEMBERS.has(parent.type))
+        return null;
+    const field = ["key", "name", "property"]
+        .map((f) => parent.childForFieldName(f))
+        .find((c) => c?.id === node.id);
+    if (!field)
+        return null;
+    const name = unescapeQuotes(node.text.slice(1, -1));
+    return /^[A-Za-z_$][\w$]*$/.test(name) ? name : null;
+}
+/** Python's optional parentheses: around an import list, a `with` clause, or a tuple. */
+const OPTIONAL_PARENS = new Set(["import_from_statement", "with_clause", "tuple", "tuple_pattern"]);
+/** A parenthesized tuple is the same tuple without the parentheses. */
+const TUPLE_AS = new Map([
+    ["tuple", "expression_list"],
+    ["tuple_pattern", "pattern_list"],
+]);
+/** An arrow function's one plain parameter, when it's written in parentheses (`(x) => x`). */
+function soleArrowParameter(node) {
+    if (node.type !== "formal_parameters" || node.parent?.type !== "arrow_function")
+        return null;
+    const params = node.namedChildren.filter((c) => c !== null && !c.isExtra);
+    if (params.length !== 1)
+        return null;
+    const p = params[0];
+    if (p.type === "identifier")
+        return p;
+    const named = p.namedChildren.filter((c) => c !== null && !c.isExtra);
+    return p.type === "required_parameter" && named.length === 1 && named[0]?.type === "identifier"
+        ? named[0]
+        : null;
+}
 /** A node as its tokens: comments and layout dropped, a trailing comma before a closer dropped. */
-export function canon(node) {
+export function canon(node, lang) {
     const tokens = [];
     const walk = (n) => {
         if (n.isExtra)
             return; // comments
+        if (formatProof && lang) {
+            const key = unquotedKey(n, lang);
+            const literal = key ?? stringLiteral(n, lang, (i) => canon(i, lang));
+            if (literal !== null) {
+                tokens.push(literal);
+                return;
+            }
+            if (n.isNamed && NUMBER_TYPES.has(n.type)) {
+                tokens.push(numberLiteral(n.text, lang));
+                return;
+            }
+            if (n.type === "parenthesized_expression" && n.namedChildCount === 1) {
+                const inner = n.namedChildren[0];
+                if (inner && !inner.isExtra)
+                    return walk(inner);
+            }
+            // (An arrow's parameters need nothing here: sigOf writes a bare one in parentheses.)
+        }
         if (n.childCount === 0) {
             const t = n.text.trim();
             if (t)
                 tokens.push(t);
             return;
         }
+        const dropParens = formatProof && lang === "python" && OPTIONAL_PARENS.has(n.type);
         for (const c of n.children)
-            if (c)
+            if (c && !(dropParens && (c.type === "(" || c.type === ")")))
                 walk(c);
     };
     walk(node);
@@ -101,20 +233,20 @@ function isExported(node) {
     return false;
 }
 /** Decorators written before a declaration: Python's `decorated_definition`, TS's on the class or export, or class-body siblings for a member. */
-function decoratorsOf(def, member) {
+function decoratorsOf(def, member, lang) {
     const out = [];
     const parent = member.parent;
     if (parent?.type === "decorated_definition" || parent?.type === "export_statement")
         for (const c of parent.namedChildren)
             if (c?.type === "decorator")
-                out.push(canon(c));
+                out.push(canon(c, lang));
     for (const c of def.namedChildren)
         if (c?.type === "decorator")
-            out.push(canon(c));
+            out.push(canon(c, lang));
     // A TS class member's decorators are the class body's children right before it.
     if (parent?.type === "class_body")
         for (let s = member.previousSibling; s?.type === "decorator"; s = s.previousSibling)
-            out.push(canon(s));
+            out.push(canon(s, lang));
     return out;
 }
 /** Keyword modifiers written before the name: `static`, `async`, `get`, `private`, `readonly`, `*`, `abstract`… */
@@ -165,23 +297,23 @@ function sigOf(def, name, lang) {
         const nameNode = n.childForFieldName("name");
         const body = [...n.children]
             .filter((c) => c !== null && c !== nameNode && !c.isExtra && c.type !== "decorator")
-            .map(canon)
+            .map((c) => canon(c, lang))
             .join(" ");
         return `${n.type} ${name} ${body}${tail}`;
     }
     const typeParams = n.childForFieldName("type_parameters");
-    const tp = typeParams ? canon(typeParams) : "";
+    const tp = typeParams ? canon(typeParams, lang) : "";
     if (def.kind === "class") {
         const heritage = lang === "python"
             ? n.childForFieldName("superclasses")
             : (n.namedChildren.find((c) => c?.type === "class_heritage") ?? null);
-        return `class ${name}${tp}${heritage ? ` ${canon(heritage)}` : ""}${tail}`;
+        return `class ${name}${tp}${heritage ? ` ${canon(heritage, lang)}` : ""}${tail}`;
     }
     const params = n.childForFieldName("parameters");
     const single = lang === "python" ? null : n.childForFieldName("parameter");
-    const ps = params ? canon(params) : single ? `(${canon(single)})` : "()";
+    const ps = params ? canon(params, lang) : single ? `(${canon(single, lang)})` : "()";
     const ret = n.childForFieldName("return_type");
-    const rs = ret ? canon(ret).replace(/^:\s*/, "") : "";
+    const rs = ret ? canon(ret, lang).replace(/^:\s*/, "") : "";
     return `fn ${name}${tp}${ps}${rs ? `->${rs}` : ""}${tail}`;
 }
 // -------------------------------------------------------------------------------------------------
@@ -237,25 +369,52 @@ function paramNames(params, lang, out) {
         }
     }
 }
-function collectLocals(subtree, outerParams, lang) {
+/**
+ * The names `subtree` binds that are local to it, aliased in `body`. For a class or a whole file
+ * (`ownNames`), from version 3 the names bound at its own top level, outside any function in it, aren't
+ * locals: they are its fields, attributes, constants and exports, and renaming one changes what other
+ * code can use (`montly_fee: float` → `monthly_fee: float` renames a model's field and its JSON key).
+ */
+function collectLocals(subtree, outerParams, lang, ownNames = false) {
     const locals = new Set();
+    const own = new Set();
+    const keepOwn = ownNames && formatProof;
+    /** Records the names `pattern` binds at `site`: the scope's own when no function lies between. */
+    const bind = (site, pattern) => {
+        if (!site)
+            return;
+        const names = new Set();
+        patternNames(pattern, names);
+        let inFunction = false;
+        if (keepOwn)
+            for (let p = site.parent; p && p.id !== subtree.id; p = p.parent)
+                if (FUNCTION_LIKE[lang].has(p.type)) {
+                    inFunction = true;
+                    break;
+                }
+        for (const name of names)
+            (keepOwn && !inFunction ? own : locals).add(name);
+    };
     paramNames(outerParams, lang, locals);
     if (lang === "python") {
         for (const fn of subtree.descendantsOfType(["function_definition", "lambda"]))
             paramNames(fn?.childForFieldName("parameters") ?? null, lang, locals);
         for (const n of subtree.descendantsOfType(["assignment", "augmented_assignment"]))
-            patternNames(n?.childForFieldName("left") ?? null, locals);
-        for (const n of subtree.descendantsOfType(["for_statement", "for_in_clause"]))
+            bind(n, n?.childForFieldName("left") ?? null);
+        for (const n of subtree.descendantsOfType(["for_statement"]))
+            bind(n, n?.childForFieldName("left") ?? null);
+        // A comprehension is a scope of its own, wherever it is.
+        for (const n of subtree.descendantsOfType(["for_in_clause"]))
             patternNames(n?.childForFieldName("left") ?? null, locals);
         for (const n of subtree.descendantsOfType(["as_pattern_target"]))
             for (const c of n?.namedChildren ?? [])
-                patternNames(c, locals);
+                bind(n, c);
         for (const n of subtree.descendantsOfType(["named_expression"]))
-            patternNames(n?.childForFieldName("name") ?? null, locals);
+            bind(n, n?.childForFieldName("name") ?? null);
     }
     else {
         for (const n of subtree.descendantsOfType(["variable_declarator"]))
-            patternNames(n?.childForFieldName("name") ?? null, locals);
+            bind(n, n?.childForFieldName("name") ?? null);
         for (const n of subtree.descendantsOfType([...FUNCTION_LIKE[lang]])) {
             paramNames(n?.childForFieldName("parameters") ?? null, lang, locals);
             const single = n?.childForFieldName("parameter");
@@ -263,10 +422,13 @@ function collectLocals(subtree, outerParams, lang) {
                 patternNames(single, locals);
         }
         for (const n of subtree.descendantsOfType(["for_in_statement"]))
-            patternNames(n?.childForFieldName("left") ?? null, locals);
+            bind(n, n?.childForFieldName("left") ?? null);
         for (const n of subtree.descendantsOfType(["catch_clause"]))
-            patternNames(n?.childForFieldName("parameter") ?? null, locals);
+            bind(n, n?.childForFieldName("parameter") ?? null);
     }
+    // A name that is also the scope's own is read as written everywhere, so the two never get confused.
+    for (const name of own)
+        locals.delete(name);
     return locals;
 }
 /** An identifier that names a value, not a property, attribute or keyword argument. */
@@ -287,12 +449,27 @@ function isValueIdentifier(node, lang) {
 function serializeBody(node, locals, normalizeLocals, lang, aliasOf) {
     if (node.isExtra)
         return "";
+    // Read once: each read of a node's type is a call into the parser.
+    const nodeType = node.type;
     // Grouping parentheses carry no meaning (the tree's shape already has the precedence), and
     // formatters add and remove them to wrap lines.
-    if (node.type === "parenthesized_expression" && node.namedChildCount === 1) {
+    if (nodeType === "parenthesized_expression" && node.namedChildCount === 1) {
         const inner = node.namedChildren[0];
         if (inner && !inner.isExtra)
             return serializeBody(inner, locals, normalizeLocals, lang, aliasOf);
+    }
+    if (formatProof && FORMATTED_TYPES.has(nodeType)) {
+        const key = unquotedKey(node, lang);
+        if (key !== null)
+            return `property_identifier:${key}`;
+        const literal = stringLiteral(node, lang, (i) => serializeBody(i, locals, normalizeLocals, lang, aliasOf));
+        if (literal !== null)
+            return `string:${literal}`;
+        if (node.isNamed && NUMBER_TYPES.has(nodeType))
+            return `${nodeType}:${numberLiteral(node.text, lang)}`;
+        const sole = soleArrowParameter(node);
+        if (sole)
+            return serializeBody(sole, locals, normalizeLocals, lang, aliasOf);
     }
     if (node.childCount === 0) {
         if (node.isNamed) {
@@ -304,21 +481,23 @@ function serializeBody(node, locals, normalizeLocals, lang, aliasOf) {
                 }
                 return `$${idx}`;
             }
-            return `${node.type}:${node.text}`;
+            return `${nodeType}:${node.text}`;
         }
-        if (node.type === "," || node.type === ";")
+        if (nodeType === "," || nodeType === ";")
             return "";
-        return node.type;
+        return nodeType;
     }
+    const dropParens = formatProof && lang === "python" && OPTIONAL_PARENS.has(nodeType);
     const parts = [];
     for (const child of node.children) {
-        if (!child)
+        if (!child || (dropParens && (child.type === "(" || child.type === ")")))
             continue;
         const s = serializeBody(child, locals, normalizeLocals, lang, aliasOf);
         if (s)
             parts.push(s);
     }
-    return `(${node.type} ${parts.join(" ")})`;
+    const type = (formatProof && lang === "python" && TUPLE_AS.get(nodeType)) || nodeType;
+    return `(${type} ${parts.join(" ")})`;
 }
 /** A Python function's docstring is documentation, not behaviour. */
 function withoutDocstring(body, lang) {
@@ -450,7 +629,10 @@ function commonJsPath(left) {
     const path = parts.filter((p) => p !== "prototype").join(".");
     return path ? { path, exported } : null;
 }
-export function extractFileSymbolsV2(root, lang, normalizeLocals) {
+export function extractFileSymbolsV2(root, lang, normalizeLocals, version = 2) {
+    return withVersion(version, () => extractSymbols(root, lang, normalizeLocals));
+}
+function extractSymbols(root, lang, normalizeLocals) {
     const importedNames = collectImportedNames(root, lang);
     const bySymbolPath = new Map();
     const fileExports = [];
@@ -467,7 +649,7 @@ export function extractFileSymbolsV2(root, lang, normalizeLocals) {
                 ? withoutDocstring(body, lang)
                 : [body];
         const locals = def.kind === "class"
-            ? collectLocals(body ?? n, null, lang)
+            ? collectLocals(body ?? n, null, lang, true)
             : collectLocals(body ?? n, n.childForFieldName("parameters") ?? n.childForFieldName("parameter"), lang);
         const aliasOf = new Map();
         const bodyNormalized = roots
@@ -565,7 +747,7 @@ export function extractFileSymbolsV2(root, lang, normalizeLocals) {
             outer: prefix ? cls : outerOf(cls),
             exported: prefix ? false : isExported(cls),
             extra: [],
-            decorators: decoratorsOf(cls, cls),
+            decorators: decoratorsOf(cls, cls, lang),
         });
         if (isType)
             return;
@@ -594,7 +776,7 @@ export function extractFileSymbolsV2(root, lang, normalizeLocals) {
                     outer: member.parent?.type === "decorated_definition" ? member.parent : member,
                     exported: false,
                     extra: [],
-                    decorators: decoratorsOf(member, member),
+                    decorators: decoratorsOf(member, member, lang),
                 });
             }
             else if (member.type === "public_field_definition" || member.type === "field_definition") {
@@ -610,7 +792,7 @@ export function extractFileSymbolsV2(root, lang, normalizeLocals) {
                     outer: member,
                     exported: false,
                     extra: [...leadingModifiers(member), ...fn.wrappers.map((w) => `wrap:${w}`)],
-                    decorators: decoratorsOf(member, member),
+                    decorators: decoratorsOf(member, member, lang),
                 });
             }
         }
@@ -629,7 +811,7 @@ export function extractFileSymbolsV2(root, lang, normalizeLocals) {
                 outer: outerOf(node),
                 exported: lang === "python" ? false : isExported(node),
                 extra: [],
-                decorators: decoratorsOf(node, node),
+                decorators: decoratorsOf(node, node, lang),
             });
         }
         else if (CLASS_LIKE.has(node.type)) {
@@ -664,7 +846,7 @@ export function extractFileSymbolsV2(root, lang, normalizeLocals) {
                 outer: outerOf(node),
                 exported: isExported(node),
                 extra: [
-                    ...(type ? [`:${canon(type).replace(/^:\s*/, "")}`] : []),
+                    ...(type ? [`:${canon(type, lang).replace(/^:\s*/, "")}`] : []),
                     ...fn.wrappers.map((w) => `wrap:${w}`),
                 ],
                 decorators: [],
@@ -693,13 +875,15 @@ export function extractFileSymbolsV2(root, lang, normalizeLocals) {
     }
     return { bySymbolPath, fileExports };
 }
-/** Whole-file `body` and `deps` for a file-only anchor, read the version-2 way. */
-export function computeWholeFileTiersV2(root, lang, normalizeLocals) {
-    const importedNames = collectImportedNames(root, lang);
-    const locals = collectLocals(root, null, lang);
-    return {
-        bodyNormalized: serializeBody(root, locals, normalizeLocals, lang, new Map()),
-        deps: collectDeps([root], lang, importedNames, locals),
-    };
+/** Whole-file `body` and `deps` for a file-only anchor, read the version-2 (or 3) way. */
+export function computeWholeFileTiersV2(root, lang, normalizeLocals, version = 2) {
+    return withVersion(version, () => {
+        const importedNames = collectImportedNames(root, lang);
+        const locals = collectLocals(root, null, lang, true);
+        return {
+            bodyNormalized: serializeBody(root, locals, normalizeLocals, lang, new Map()),
+            deps: collectDeps([root], lang, importedNames, locals),
+        };
+    });
 }
 //# sourceMappingURL=extract-v2.js.map
